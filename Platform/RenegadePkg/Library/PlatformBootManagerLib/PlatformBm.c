@@ -734,11 +734,17 @@ VOID EFIAPI PlatformBootManagerWaitCallback(UINT16 TimeoutRemain)
   }
 }
 
-/**
-  The function is called when no boot option could be launched,
-  including platform recovery options and options pointing to applications
-  built into firmware volumes.
+VOID EFIAPI PlatformBootManagerUnableToBoot(VOID)
+{
+  EFI_STATUS                   Status;
+  EFI_BOOT_MANAGER_LOAD_OPTION BootOption;
 
-  If this function returns, BDS attempts to enter an infinite loop.
-**/
-VOID EFIAPI PlatformBootManagerUnableToBoot(VOID) { return; }
+  Print(L"\n[Tianocore] No default OS found on ESP. Launching UEFI Menu / Shell...\n");
+  Status = EfiBootManagerGetBootManagerMenu(&BootOption);
+  if (!EFI_ERROR(Status)) {
+    EfiBootManagerBoot(&BootOption);
+  }
+
+  Print(L"[Tianocore] UEFI halted safely. Press Power to turn off.\n");
+  CpuDeadLoop();
+}

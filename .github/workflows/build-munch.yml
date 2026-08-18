@@ -20,7 +20,7 @@ permissions:
 jobs:
   build:
     name: Build Munch UEFI Boot Image
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout repository
@@ -31,8 +31,9 @@ jobs:
 
       - name: Install dependencies
         run: |
+          export DEBIAN_FRONTEND=noninteractive
           sudo apt-get update
-          sudo apt-get install -y \
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             build-essential \
             uuid-dev \
             iasl \
@@ -61,33 +62,33 @@ jobs:
 
       - name: Prepare Artifacts Directory
         run: |
-          mkdir -p output/
-          cp -v boot-munch.img output/ 2>/dev/null || true
-          cp -v uefi-munch* output/ 2>/dev/null || true
-          cp -v uefi-installer-munch*.zip output/ 2>/dev/null || true
-          find workspace/Build/ -name "*.fd" -exec cp -v {} output/ \; 2>/dev/null || true
-          ls -la output/
+          mkdir -p artifacts
+          cp -v Build/munch/RELEASE_CLANG38/FV/SM8250_UEFI.fd artifacts/SM8250_UEFI.fd 2>/dev/null || true
+          cp -v boot-*.img artifacts/ 2>/dev/null || true
+          cp -v uefi-installer-*.zip artifacts/ 2>/dev/null || true
+          ls -lh artifacts/
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: munch-uefi-boot-images
-          path: output/*
+          name: munch-uefi-build-${{ github.sha }}
+          path: artifacts/*
+          if-no-files-found: error
 
       - name: Create GitHub Release
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: munch-uefi-${{ github.sha }}
-          name: "Munch UEFI Bootloader Build (${{ github.sha }})"
+          name: Munch UEFI Bootloader Build (${{ github.sha }})
           body: |
-            ### Munch (Xiaomi POCO F4 / Redmi K40S) UEFI Bootloader
-            Built for Windows on ARM (WOA) and Linux booting via EDK2.
-            
-            **Files:**
-            - `boot-munch.img` / `uefi-munch.img`: Fastboot / WOA Helper bootable kernel image
-            - `uefi-installer-munch.zip`: TWRP/Recovery flashable zip
-            - `SM8250_UEFI.fd`: Raw UEFI Firmware Volume
-          files: output/*
+            ## Munch (POCO F4 / Redmi K40S) UEFI Image
+            - **Commit**: `${{ github.sha }}`
+            - **Device**: Xiaomi POCO F4 / Redmi K40S (`munch`)
+            - **Platform**: Qualcomm Snapdragon 870 (`SM8250`)
+          files: |
+            artifacts/*
+          draft: false
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

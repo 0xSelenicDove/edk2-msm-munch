@@ -20,7 +20,7 @@ permissions:
 jobs:
   build:
     name: Build Munch UEFI Boot Image
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
@@ -31,8 +31,12 @@ jobs:
 
       - name: Install dependencies
         run: |
-          export DEBIAN_FRONTEND=noninteractive
-          sudo apt-get update
+          set -e
+          echo 'Acquire::ForceIPv4 "true";' | sudo tee /etc/apt/apt.conf.d/99force-ipv4
+          echo 'Acquire::http::Timeout "15";' | sudo tee -a /etc/apt/apt.conf.d/99timeout
+          echo 'Acquire::https::Timeout "15";' | sudo tee -a /etc/apt/apt.conf.d/99timeout
+          sudo sed -i 's/archive.ubuntu.com/azure.archive.ubuntu.com/g' /etc/apt/sources.list 2>/dev/null || true
+          sudo apt-get update -o Acquire::Retries=3 -y
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             build-essential \
             uuid-dev \

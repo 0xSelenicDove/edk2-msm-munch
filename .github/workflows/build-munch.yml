@@ -1,0 +1,93 @@
+name: Build Munch (POCO F4 / Redmi K40S) UEFI
+
+on:
+  push:
+    branches:
+      - master
+      - main
+    paths-ignore:
+      - 'README.md'
+      - '.gitignore'
+  pull_request:
+    branches:
+      - master
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Munch UEFI Boot Image
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            uuid-dev \
+            iasl \
+            git \
+            nasm \
+            python-is-python3 \
+            python3-pip \
+            python3-pil \
+            python3-git \
+            gettext \
+            gcc-aarch64-linux-gnu \
+            clang \
+            llvm \
+            device-tree-compiler \
+            abootimg \
+            libsdl2-2.0-0 \
+            libsdl2-dev
+
+      - name: Build UEFI Boot Image for Munch
+        run: |
+          ./build.sh --device munch --release RELEASE
+
+      - name: Build Flashable Installer Zip for Munch
+        run: |
+          ./build.sh --device munch --installer-zip
+
+      - name: Prepare Artifacts Directory
+        run: |
+          mkdir -p output/
+          cp -v boot-munch.img output/ 2>/dev/null || true
+          cp -v uefi-munch* output/ 2>/dev/null || true
+          cp -v uefi-installer-munch*.zip output/ 2>/dev/null || true
+          find workspace/Build/ -name "*.fd" -exec cp -v {} output/ \; 2>/dev/null || true
+          ls -la output/
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: munch-uefi-boot-images
+          path: output/*
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: munch-uefi-${{ github.sha }}
+          name: "Munch UEFI Bootloader Build (${{ github.sha }})"
+          body: |
+            ### Munch (Xiaomi POCO F4 / Redmi K40S) UEFI Bootloader
+            Built for Windows on ARM (WOA) and Linux booting via EDK2.
+            
+            **Files:**
+            - `boot-munch.img` / `uefi-munch.img`: Fastboot / WOA Helper bootable kernel image
+            - `uefi-installer-munch.zip`: TWRP/Recovery flashable zip
+            - `SM8250_UEFI.fd`: Raw UEFI Firmware Volume
+          files: output/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

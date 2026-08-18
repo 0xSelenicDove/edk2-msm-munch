@@ -19,7 +19,7 @@
   gQcomTokenSpaceGuid.PcdMipiFrameBufferAddress|0x9c000000
   gQcomTokenSpaceGuid.PcdMipiFrameBufferWidth|1080
   gQcomTokenSpaceGuid.PcdMipiFrameBufferHeight|2400
-  gQcomTokenSpaceGuid.PcdMipiFrameBufferDelay|30000
+  gQcomTokenSpaceGuid.PcdMipiFrameBufferDelay|1500000
 
   gRenegadePkgTokenSpaceGuid.PcdDeviceVendor|"Xiaomi"
   gRenegadePkgTokenSpaceGuid.PcdDeviceProduct|"POCO F4 / Redmi K40S"

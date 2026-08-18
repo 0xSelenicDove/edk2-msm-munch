@@ -198,11 +198,10 @@ READ_LOCK_STATUS   = TRUE
   INF Platform/RenegadePkg/Drivers/LogoDxe/LogoDxe.inf
 
   #
-  # Simple Init GUI
+  # Simple Init GUI (Disabled for Direct Windows / UEFI BDS Boot)
   #
-  INF src/main/SimpleInitMain.inf
-
-  INF src/kernelfdt/KernelFdtDxe.inf
+  # INF src/main/SimpleInitMain.inf
+  # INF src/kernelfdt/KernelFdtDxe.inf
 
 !if $(AB_SLOTS_SUPPORT) == TRUE
   INF GPLDrivers/Drivers/BootSlotDxe/BootSlotDxe.inf

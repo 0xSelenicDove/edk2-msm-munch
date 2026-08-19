@@ -516,6 +516,7 @@ VOID EFIAPI PlatformBootManagerBeforeConsole(VOID)
   EfiBootManagerUpdateConsoleVariable(
       ConIn, (EFI_DEVICE_PATH_PROTOCOL *)&mUsbKeyboard, NULL);
 
+  EFI_STATUS                Status;
   EFI_HANDLE *              handles;
   UINTN                     NoHandles;
   EFI_DEVICE_PATH_PROTOCOL *devicehandle;

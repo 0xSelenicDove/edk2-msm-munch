@@ -175,3 +175,8 @@
     SECTION PE32 = Platform/EFI_Binaries/Drivers/fsdrivers/exfat_aa64.efi
     SECTION UI = "ExfatDxe"
   }
+
+  FILE DRIVER = 7DDA7772-B8F5-4859-9DBA-0D6F2DBA4AF1 {
+    SECTION PE32 = Platform/EFI_Binaries/Drivers/fsdrivers/ext2_aa64.efi
+    SECTION UI = "Ext2Dxe"
+  }

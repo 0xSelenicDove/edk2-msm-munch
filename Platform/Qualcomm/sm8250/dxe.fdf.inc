@@ -165,3 +165,13 @@
     SECTION PE32 = Platform/EFI_Binaries/Drivers/sm8250/XhciPciEmulation/XhciPciEmulation.efi
     SECTION UI = "XhciPciEmulation"
   }
+
+  FILE DRIVER = 80FB68D4-7C52-4AFE-A91E-D3DDADB5C54F {
+    SECTION PE32 = Platform/EFI_Binaries/Drivers/fsdrivers/ntfs_aa64.efi
+    SECTION UI = "NtfsDxe"
+  }
+
+  FILE DRIVER = 2920E524-AD21-499E-9F4A-466BFDC3BFFB {
+    SECTION PE32 = Platform/EFI_Binaries/Drivers/fsdrivers/exfat_aa64.efi
+    SECTION UI = "ExfatDxe"
+  }

@@ -20,7 +20,7 @@ permissions:
 jobs:
   build:
     name: Build Munch UEFI Boot Image
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout repository
@@ -29,9 +29,11 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
-      - name: Install dependencies
+      - name: Configure Fast Azure Mirror & Install dependencies
         run: |
-          sudo apt-get update
+          sudo sed -i 's|http://archive.ubuntu.com/ubuntu/|http://azure.archive.ubuntu.com/ubuntu/|g' /etc/apt/sources.list
+          sudo sed -i 's|http://security.ubuntu.com/ubuntu/|http://azure.archive.ubuntu.com/ubuntu/|g' /etc/apt/sources.list
+          sudo apt-get update -y
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             iasl \
             device-tree-compiler \

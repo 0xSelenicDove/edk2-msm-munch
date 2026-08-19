@@ -54,45 +54,57 @@
 ## 🚀 Quick Start & Flashing Guide
 
 ### 1. Prerequisites
-* Unlocked bootloader on your Xiaomi POCO F4.
-* Re-partitioned storage with an `esp` (FAT32, ~500MB) and `win` (NTFS, 64GB+) partition created via WOA Helper or parted.
-* Windows 11 ARM64 deployed to the `win` partition.
+* Unlocked bootloader on your Xiaomi POCO F4 / Redmi K40S (`munch`).
+* Storage partitioned into:
+  * **ESP Partition (`sda35`):** FAT32 (~500 MB) — Contains **only** `/EFI/` bootloader files.
+  * **Windows Partition (`sda36`):** NTFS (64 GB+) — Contains the full Windows 11 ARM64 OS.
+* Stock HyperOS / Android 13/14 rooted boot image (`boot_a.img`).
 
-### 2. Download Pre-built Release
-Download the latest `uefi-installer-munch.zip` from the [Releases](https://github.com/0xSelenicDove/edk2-msm-munch/releases) page.
+---
 
-### 3. Assemble Dual-Boot Image (macOS / Linux / Windows)
-```bash
-# 1. Patch your stock Android kernel with BootShim
-kernelpatcher stock_kernel.bin BootShim.Dualboot.bin 7340032
+### 2. Automated Installation via Dual-Boot ZIP (Recommended)
+1. Download the latest `uefi-installer-munch.zip` from [Releases](https://github.com/0xSelenicDove/edk2-msm-munch/releases).
+2. Flash in Magisk / KernelSU / Recovery, or push via ADB shell:
+   ```bash
+   mkdir -p /data/local/tmp/installer
+   unzip -o /data/local/tmp/uefi-installer.zip -d /data/local/tmp/installer
+   cd /data/local/tmp/installer
+   chmod -R 755 /data/local/tmp/installer
+   sh META-INF/com/google/android/update-binary dummy 1 /data/local/tmp/uefi-installer.zip
+   ```
+3. Reboot and **hold `Volume Up`** during power-on to launch Windows 11!
 
-# 2. Append UEFI firmware payload
-cat patched_kernel.bin munch_UEFI.fd > final_kernel.bin
+---
 
-# 3. Repack into boot.img (Header v3) and flash via Fastboot
-fastboot flash boot_a dualboot.img
-fastboot reboot
+### 3. Optimal BCD Configuration
+For fast, clean, and error-free boot:
+```cmd
+bcdedit /store BCD /set {bootmgr} device boot
+bcdedit /store BCD /set {default} device locate=\Windows\system32\winload.efi
+bcdedit /store BCD /set {default} osdevice locate=\Windows
+bcdedit /store BCD /set {default} path \Windows\system32\winload.efi
+bcdedit /store BCD /set {default} systemroot \Windows
+bcdedit /store BCD /set {default} testsigning Yes
+bcdedit /store BCD /set {default} nointegritychecks Yes
+bcdedit /store BCD /set {default} hypervisorlaunchtype Off
+bcdedit /store BCD /set {default} vsmlaunchtype Off
+bcdedit /store BCD /set {default} quietboot Yes
+bcdedit /store BCD /set {default} bootstatuspolicy IgnoreAllFailures
 ```
 
 ---
 
-## 🛠️ Building from Source
+## 🛠️ Troubleshooting & Knowledge Base
 
-### Automated CI / CD Build
-Every commit pushed to the `master` branch automatically triggers the `.github/workflows/build-munch.yml` pipeline with fast Azure Ubuntu mirrors and IPv4 routing, generating flashable zips and `.fd` binaries under GitHub Releases.
+### 1. Error `0xc000000f` Right After Windows Logo
+* **Cause:** When duplicate `\Windows\` directories exist on both `sda35` (FAT32 ESP) and `sda36` (NTFS), BCD's `locate` matches Partition 35 first, running out of space and missing subsystem files.
+* **Fix:** Keep `sda35` clean with **only `/EFI/`**. Let the embedded `NtfsDxe` driver mount `sda36` directly.
 
-### Local Linux Build (Ubuntu 22.04 / 24.04)
-```bash
-# Install toolchain
-sudo apt-get install -y build-essential clang llvm gcc-aarch64-linux-gnu python3 python3-distutils uuid-dev nasm
+### 2. Error `0xc0e90002` (Code Integrity Failed)
+* **Fix:** Ensure `testsigning Yes` and `nointegritychecks Yes` are set in BCD, and offline driver packages in `DriverStore` have valid catalog associations.
 
-# Clone repository with submodules
-git clone --recursive https://github.com/0xSelenicDove/edk2-msm-munch.git
-cd edk2-msm-munch
-
-# Build UEFI payload for munch
-./build.sh --device munch
-```
+### 3. Memory Allocation on 12 GB RAM Models
+* **Fix:** The EDK2 memory descriptor uses the standard `"RAM Partition"` naming with continuous physical address ranges extending up to `0x300000000` (12 GB).
 
 ---
 

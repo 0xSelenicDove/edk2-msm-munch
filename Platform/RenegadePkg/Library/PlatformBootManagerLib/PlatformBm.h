@@ -27,6 +27,8 @@
 #include <Library/UefiBootServicesTableLib.h>
 #include <Library/UefiLib.h>
 #include <Library/UefiRuntimeServicesTableLib.h>
+#include <Protocol/BlockIo.h>
+#include <Protocol/SimpleFileSystem.h>
 
 /**
   Use SystemTable Conout to stop video based Simple Text Out consoles from

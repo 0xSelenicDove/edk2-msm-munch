@@ -12,3 +12,9 @@ FILE FREEFORM = 7E374E25-8E01-4FEE-87F2-390C23C606CD {
 FILE FREEFORM = 25462CDA-221F-47DF-AC1D-259CFAA4E326 {
   SECTION RAW = Platform/Xiaomi/sm8250/FdtBlob_compat/munch.dtb
 }
+
+// NTFS Filesystem Driver
+FILE DRIVER = 5bd181db-0487-4f1a-ae73-820e165611b4 {
+  SECTION PE32 = Platform/Xiaomi/sm8250/Drivers/ntfs_aa64.efi
+  SECTION UI = "NtfsDxe"
+}

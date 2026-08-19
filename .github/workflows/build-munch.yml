@@ -29,32 +29,28 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
+      - name: Restore Apt Cache
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: apt-cache-${{ runner.os }}-${{ hashFiles('.github/workflows/build-munch.yml') }}
+          restore-keys: |
+            apt-cache-${{ runner.os }}-
+
       - name: Install dependencies
         run: |
           set -e
-          echo 'Acquire::ForceIPv4 "true";' | sudo tee /etc/apt/apt.conf.d/99force-ipv4
-          echo 'Acquire::http::Timeout "15";' | sudo tee -a /etc/apt/apt.conf.d/99timeout
-          echo 'Acquire::https::Timeout "15";' | sudo tee -a /etc/apt/apt.conf.d/99timeout
-          sudo sed -i 's/archive.ubuntu.com/azure.archive.ubuntu.com/g' /etc/apt/sources.list 2>/dev/null || true
-          sudo apt-get update -o Acquire::Retries=3 -y
+          sudo apt-get update -o Acquire::ForceIPv4=true -o Acquire::Retries=3 -y
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            build-essential \
-            uuid-dev \
             iasl \
-            git \
-            nasm \
-            python-is-python3 \
-            python3-pip \
-            python3-pil \
-            python3-git \
-            gettext \
-            gcc-aarch64-linux-gnu \
-            clang \
-            llvm \
             device-tree-compiler \
             abootimg \
-            libsdl2-2.0-0 \
-            libsdl2-dev
+            python3-pil \
+            python-is-python3 \
+            uuid-dev \
+            nasm \
+            gcc-aarch64-linux-gnu \
+            build-essential
 
       - name: Build UEFI Boot Image for Munch
         run: |

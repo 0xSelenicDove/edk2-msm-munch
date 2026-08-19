@@ -710,45 +710,25 @@ VOID EFIAPI PlatformBootManagerAfterConsole(VOID)
       Status = Fs->OpenVolume(Fs, &Root);
       if (EFI_ERROR(Status)) continue;
 
-      Status = Root->Open(
-          Root, &File, L"\\Windows\\system32\\winload.efi",
-          EFI_FILE_MODE_READ, 0);
-      if (!EFI_ERROR(Status)) {
-        Print(L"[UEFI] Booting Windows 11 winload.efi directly from FS %d...\n", FsIdx);
-        File->Close(File);
-        Root->Close(Root);
-
-        EFI_DEVICE_PATH_PROTOCOL *WinloadDevPath = FileDevicePath(FsHandles[FsIdx], L"\\Windows\\system32\\winload.efi");
-        if (WinloadDevPath != NULL) {
-          EFI_BOOT_MANAGER_LOAD_OPTION WinloadOption;
-          Status = EfiBootManagerInitializeLoadOption(
-              &WinloadOption, LoadOptionNumberUnassigned,
-              LoadOptionTypeBoot, LOAD_OPTION_ACTIVE,
-              L"Windows 11 Direct", WinloadDevPath, NULL, 0);
-          if (!EFI_ERROR(Status)) {
-            EfiBootManagerAddLoadOptionVariable(&WinloadOption, 0);
-          }
-        }
-        continue;
-      }
-
-      Status = gBS->HandleProtocol(
-          FsHandles[FsIdx], &gEfiSimpleFileSystemProtocolGuid, (VOID **)&Fs);
-      if (EFI_ERROR(Status)) continue;
-
-      Status = Fs->OpenVolume(Fs, &Root);
-      if (EFI_ERROR(Status)) continue;
-
       // Check for Windows Boot Manager
       Status = Root->Open(
           Root, &File, L"\\EFI\\Microsoft\\Boot\\bootmgfw.efi",
           EFI_FILE_MODE_READ, 0);
+      if (EFI_ERROR(Status)) {
+        Status = Root->Open(
+            Root, &File, L"\\EFI\\Boot\\bootaa64.efi",
+            EFI_FILE_MODE_READ, 0);
+      }
       if (!EFI_ERROR(Status)) {
+        Print(L"[UEFI] Found Windows Bootloader on FS %d!\n", FsIdx);
         File->Close(File);
         Root->Close(Root);
 
         EFI_DEVICE_PATH_PROTOCOL *DevicePath;
         DevicePath = FileDevicePath(FsHandles[FsIdx], L"\\EFI\\Microsoft\\Boot\\bootmgfw.efi");
+        if (DevicePath == NULL) {
+          DevicePath = FileDevicePath(FsHandles[FsIdx], L"\\EFI\\Boot\\bootaa64.efi");
+        }
         if (DevicePath != NULL) {
           EFI_BOOT_MANAGER_LOAD_OPTION WinBootOption;
           Status = EfiBootManagerInitializeLoadOption(

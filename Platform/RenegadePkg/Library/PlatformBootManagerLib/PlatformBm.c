@@ -522,15 +522,15 @@ VOID EFIAPI PlatformBootManagerBeforeConsole(VOID)
   /*CHAR16 *devicepathtxt;*/
   // EfiBootManagerUpdateConsoleVariable(ConIn,
   //  (EFI_DEVICE_PATH_PROTOCOL*)&gQcomKeypadDeviceGuid, NULL);
-  gBS->LocateHandleBuffer(
+  Status = gBS->LocateHandleBuffer(
       ByProtocol, &gEfiSimpleTextInputExProtocolGuid, NULL, &NoHandles,
       &handles);
-  devicehandle = DevicePathFromHandle(handles[1]);
-  EfiBootManagerUpdateConsoleVariable(
-      ConIn, devicehandle, NULL); /*
-            devicepathtxt = ConvertDevicePathToText(devicehandle,TRUE,TRUE);
-            DEBUG((DEBUG_ERROR,"There are %s handles\n",devicepathtxt));
-            ASSERT(0);*/
+  if (!EFI_ERROR(Status) && NoHandles > 1 && handles != NULL) {
+    devicehandle = DevicePathFromHandle(handles[1]);
+    if (devicehandle != NULL) {
+      EfiBootManagerUpdateConsoleVariable(ConIn, devicehandle, NULL);
+    }
+  }
 
   //
   // Add the hardcoded serial console device path to ConIn, ConOut, ErrOut.
@@ -668,9 +668,63 @@ VOID EFIAPI PlatformBootManagerAfterConsole(VOID)
   HandleCapsules();
 
   //
+  // Disable watchdog timer to prevent reboot during UEFI boot sequence
+  //
+  gBS->SetWatchdogTimer(0, 0x0000, 0, NULL);
+
+  //
   // Enumerate all possible boot options.
   //
   EfiBootManagerRefreshAllBootOption();
+
+  //
+  // Scan all FAT32 partitions (ESP) for Windows 11 Boot Manager
+  //
+  EFI_HANDLE *FsHandles;
+  UINTN       FsNoHandles;
+  Status = gBS->LocateHandleBuffer(
+      ByProtocol, &gEfiSimpleFileSystemProtocolGuid, NULL, &FsNoHandles,
+      &FsHandles);
+  if (!EFI_ERROR(Status) && FsHandles != NULL) {
+    for (UINTN FsIdx = 0; FsIdx < FsNoHandles; FsIdx++) {
+      EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *Fs;
+      EFI_FILE_PROTOCOL               *Root;
+      EFI_FILE_PROTOCOL               *File;
+
+      Status = gBS->HandleProtocol(
+          FsHandles[FsIdx], &gEfiSimpleFileSystemProtocolGuid, (VOID **)&Fs);
+      if (EFI_ERROR(Status)) continue;
+
+      Status = Fs->OpenVolume(Fs, &Root);
+      if (EFI_ERROR(Status)) continue;
+
+      // Check for Windows Boot Manager
+      Status = Root->Open(
+          Root, &File, L"\\EFI\\Microsoft\\Boot\\bootmgfw.efi",
+          EFI_FILE_MODE_READ, 0);
+      if (!EFI_ERROR(Status)) {
+        File->Close(File);
+        Root->Close(Root);
+
+        EFI_DEVICE_PATH_PROTOCOL *DevicePath;
+        DevicePath = FileDevicePath(FsHandles[FsIdx], L"\\EFI\\Microsoft\\Boot\\bootmgfw.efi");
+        if (DevicePath != NULL) {
+          EFI_BOOT_MANAGER_LOAD_OPTION WinBootOption;
+          Status = EfiBootManagerInitializeLoadOption(
+              &WinBootOption, LoadOptionNumberUnassigned,
+              LoadOptionTypeBoot, LOAD_OPTION_ACTIVE,
+              L"Windows Boot Manager", DevicePath, NULL, 0);
+          if (!EFI_ERROR(Status)) {
+            EfiBootManagerAddLoadOptionVariable(&WinBootOption, 0);
+            EfiBootManagerFreeLoadOption(&WinBootOption);
+          }
+        }
+        break;
+      }
+      Root->Close(Root);
+    }
+    FreePool(FsHandles);
+  }
 
   //
   // Register UEFI Shell

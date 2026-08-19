@@ -50,7 +50,10 @@ jobs:
             uuid-dev \
             nasm \
             gcc-aarch64-linux-gnu \
-            build-essential
+            build-essential \
+            gettext \
+            clang \
+            llvm
 
       - name: Build UEFI Boot Image for Munch
         run: |

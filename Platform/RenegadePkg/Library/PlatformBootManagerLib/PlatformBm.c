@@ -669,9 +669,19 @@ VOID EFIAPI PlatformBootManagerAfterConsole(VOID)
   HandleCapsules();
 
   //
-  // Disable watchdog timer to prevent reboot during UEFI boot sequence
+  // Explicitly connect all BlockIo handles recursively so NtfsDxe mounts all disk partitions
   //
-  gBS->SetWatchdogTimer(0, 0x0000, 0, NULL);
+  UINTN       BlockCount;
+  EFI_HANDLE *BlockHandles;
+  Status = gBS->LocateHandleBuffer(
+      ByProtocol, &gEfiBlockIoProtocolGuid, NULL, &BlockCount,
+      &BlockHandles);
+  if (!EFI_ERROR(Status) && BlockHandles != NULL) {
+    for (UINTN bIdx = 0; bIdx < BlockCount; bIdx++) {
+      gBS->ConnectController(BlockHandles[bIdx], NULL, NULL, TRUE);
+    }
+    FreePool(BlockHandles);
+  }
 
   //
   // Enumerate all possible boot options.
@@ -679,18 +689,34 @@ VOID EFIAPI PlatformBootManagerAfterConsole(VOID)
   EfiBootManagerRefreshAllBootOption();
 
   //
-  // Scan all FAT32 partitions (ESP) for Windows 11 Boot Manager
+  // Scan all FAT32/NTFS partitions for Windows 11 Boot Manager & winload.efi
   //
   EFI_HANDLE *FsHandles;
   UINTN       FsNoHandles;
   Status = gBS->LocateHandleBuffer(
       ByProtocol, &gEfiSimpleFileSystemProtocolGuid, NULL, &FsNoHandles,
       &FsHandles);
+  Print(L"[UEFI] Mounted Filesystems Count: %d\n", FsNoHandles);
   if (!EFI_ERROR(Status) && FsHandles != NULL) {
     for (UINTN FsIdx = 0; FsIdx < FsNoHandles; FsIdx++) {
       EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *Fs;
       EFI_FILE_PROTOCOL               *Root;
       EFI_FILE_PROTOCOL               *File;
+
+      Status = gBS->HandleProtocol(
+          FsHandles[FsIdx], &gEfiSimpleFileSystemProtocolGuid, (VOID **)&Fs);
+      if (EFI_ERROR(Status)) continue;
+
+      Status = Fs->OpenVolume(Fs, &Root);
+      if (EFI_ERROR(Status)) continue;
+
+      Status = Root->Open(
+          Root, &File, L"\\Windows\\system32\\winload.efi",
+          EFI_FILE_MODE_READ, 0);
+      if (!EFI_ERROR(Status)) {
+        Print(L"[UEFI] Found \\Windows\\system32\\winload.efi on FS %d!\n", FsIdx);
+        File->Close(File);
+      }
 
       Status = gBS->HandleProtocol(
           FsHandles[FsIdx], &gEfiSimpleFileSystemProtocolGuid, (VOID **)&Fs);

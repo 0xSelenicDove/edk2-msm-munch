@@ -13,18 +13,15 @@
 
 !include Platform/Qualcomm/sm8250/sm8250.dsc
 
-[LibraryClasses.common]
-  DebugLib|MdePkg/Library/BaseDebugLibNull/BaseDebugLibNull.inf
+[BuildOptions.common]
+  GCC:*_*_AARCH64_CC_FLAGS = -DENABLE_SIMPLE_INIT -DENABLE_LINUX_SIMPLE_MASS_STORAGE
 
 [PcdsFixedAtBuild.common]
-  gEfiMdePkgTokenSpaceGuid.PcdPlatformBootTimeOut|5
-  gEfiMdePkgTokenSpaceGuid.PcdDebugPropertyMask|0x00
-  gEfiMdePkgTokenSpaceGuid.PcdDebugPrintErrorLevel|0x00000000
-
-  gQcomTokenSpaceGuid.PcdMipiFrameBufferAddress|0x9c000000
   gQcomTokenSpaceGuid.PcdMipiFrameBufferWidth|1080
   gQcomTokenSpaceGuid.PcdMipiFrameBufferHeight|2400
-  gQcomTokenSpaceGuid.PcdMipiFrameBufferDelay|1000000
+
+  # Simple Init
+  gSimpleInitTokenSpaceGuid.PcdGuiDefaultDPI|420
 
   gRenegadePkgTokenSpaceGuid.PcdDeviceVendor|"Xiaomi"
   gRenegadePkgTokenSpaceGuid.PcdDeviceProduct|"POCO F4 / Redmi K40S"

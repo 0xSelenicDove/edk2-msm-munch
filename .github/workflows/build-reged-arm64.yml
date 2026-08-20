@@ -21,6 +21,7 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/rescatux/chntpw.git
           make -C chntpw CC=aarch64-linux-gnu-gcc CFLAGS='-O2 -Wall' reged.static
+          aarch64-linux-gnu-gcc -static -O2 -o chntpw/argv-dump .github/tools/argv-dump.c
           file chntpw/reged.static
           aarch64-linux-gnu-readelf -l chntpw/reged.static | grep -qv INTERP
 
@@ -28,5 +29,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: reged-static-aarch64
-          path: chntpw/reged.static
+          path: |
+            chntpw/reged.static
+            chntpw/argv-dump
           if-no-files-found: error

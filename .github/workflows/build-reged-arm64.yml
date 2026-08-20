@@ -1,4 +1,4 @@
-name: Build static ARM64 reged
+name: Build static ARM64 registry and SAM tools
 
 on:
   push:
@@ -20,19 +20,22 @@ jobs:
             gcc-aarch64-linux-gnu \
             libc6-dev-arm64-cross
 
-      - name: Build static reged
+      - name: Build static reged and chntpw
         run: |
           git clone --depth 1 https://github.com/rescatux/chntpw.git
-          make -C chntpw CC=aarch64-linux-gnu-gcc CFLAGS='-O2 -Wall -fsigned-char' reged.static
+          make -C chntpw CC=aarch64-linux-gnu-gcc CFLAGS='-O2 -Wall -fsigned-char' reged.static chntpw.static
           aarch64-linux-gnu-gcc -static -O2 -o chntpw/argv-dump .github/tools/argv-dump.c
           file chntpw/reged.static
+          file chntpw/chntpw.static
           aarch64-linux-gnu-readelf -l chntpw/reged.static | grep -qv INTERP
+          aarch64-linux-gnu-readelf -l chntpw/chntpw.static | grep -qv INTERP
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: reged-static-aarch64
+          name: windows-offline-tools-static-aarch64
           path: |
             chntpw/reged.static
+            chntpw/chntpw.static
             chntpw/argv-dump
           if-no-files-found: error

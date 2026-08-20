@@ -23,7 +23,7 @@ jobs:
       - name: Build static reged
         run: |
           git clone --depth 1 https://github.com/rescatux/chntpw.git
-          make -C chntpw CC=aarch64-linux-gnu-gcc CFLAGS='-O2 -Wall' reged.static
+          make -C chntpw CC=aarch64-linux-gnu-gcc CFLAGS='-O2 -Wall -fsigned-char' reged.static
           aarch64-linux-gnu-gcc -static -O2 -o chntpw/argv-dump .github/tools/argv-dump.c
           file chntpw/reged.static
           aarch64-linux-gnu-readelf -l chntpw/reged.static | grep -qv INTERP

@@ -11,6 +11,7 @@
 **/
 
 #include <Guid/EventGroup.h>
+#include <Guid/GlobalVariable.h>
 #include <Guid/SerialPortLibVendor.h>
 #include <Guid/TtyTerm.h>
 #include <IndustryStandard/Pci22.h>
@@ -457,6 +458,17 @@ VOID PlatformRegisterOptionsAndKeys(VOID)
       &gSimpleInitFileGuid, L"Simple Init", LOAD_OPTION_ACTIVE);
   Status = EfiBootManagerAddKeyOptionVariable(
       NULL, (UINT16)OptionSimpleInit, 0, &UP, NULL);
+#ifdef ENABLE_AUTOMATIC_SIMPLE_INIT
+  // Consume BootNext once during this boot, then let SimpleInit launch the
+  // selected OS. Re-create it on the next cold boot so the menu is always
+  // reachable without changing the persistent BootOrder.
+  UINT16 SimpleInitBootNext = OptionSimpleInit;
+  gRT->SetVariable(
+      L"BootNext", &gEfiGlobalVariableGuid,
+      EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS |
+          EFI_VARIABLE_RUNTIME_ACCESS,
+      sizeof(SimpleInitBootNext), &SimpleInitBootNext);
+#endif
 #else
   Status = EfiBootManagerAddKeyOptionVariable(
       NULL, (UINT16)BootOption.OptionNumber, 0, &UP, NULL);

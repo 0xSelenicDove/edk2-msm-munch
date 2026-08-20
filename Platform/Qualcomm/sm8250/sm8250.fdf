@@ -197,11 +197,20 @@ READ_LOCK_STATUS   = TRUE
   INF MdeModulePkg/Application/UiApp/UiApp.inf
   INF Platform/RenegadePkg/Drivers/LogoDxe/LogoDxe.inf
 
+!if $(MUNCH_MULTIBOOT) == TRUE
   #
-  # Simple Init GUI (Disabled for Direct Windows / UEFI BDS Boot)
+  # Redmi K40S startup menu and Android/TWRP chainloader support.
   #
-  # INF src/main/SimpleInitMain.inf
-  # INF src/kernelfdt/KernelFdtDxe.inf
+  INF src/main/SimpleInitMain.inf
+  INF src/kernelfdt/KernelFdtDxe.inf
+
+  FILE FREEFORM = 4b0364cf-1c5b-47aa-9073-d7b5039ce49b {
+    SECTION RAW = Platform/Xiaomi/sm8250/munch.multiboot.uefi.conf
+    SECTION UI = "simpleinit.static.uefi.cfg"
+  }
+
+  INF Platform/RenegadePkg/Application/Reboot2PayloadApp/Reboot2PayloadApp.inf
+!endif
 
 !if $(AB_SLOTS_SUPPORT) == TRUE
   INF GPLDrivers/Drivers/BootSlotDxe/BootSlotDxe.inf
@@ -209,12 +218,14 @@ READ_LOCK_STATUS   = TRUE
 !endif
 
 !if $(ENABLE_LINUX_UTILS) == 1
+!ifndef $(MUNCH_MULTIBOOT)
   FILE FREEFORM = 4b0364cf-1c5b-47aa-9073-d7b5039ce49b {
     SECTION RAW = tools/simpleinit.static.uefi.cfg
     SECTION UI = "simpleinit.static.uefi.cfg"
   }
 
   INF Platform/RenegadePkg/Application/Reboot2PayloadApp/Reboot2PayloadApp.inf
+!endif
 !endif
 
 # Device specific fdf

@@ -10,6 +10,9 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
+      - name: Checkout diagnostic source
+        uses: actions/checkout@v4
+
       - name: Install cross compiler
         run: |
           sudo apt-get update

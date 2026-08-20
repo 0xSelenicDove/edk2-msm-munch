@@ -1,0 +1,30 @@
+name: Build static ARM64 reged
+
+on:
+  push:
+    branches:
+      - tools/reged-arm64
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Install cross compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu
+
+      - name: Build static reged
+        run: |
+          git clone --depth 1 https://github.com/rescatux/chntpw.git
+          make -C chntpw CC=aarch64-linux-gnu-gcc reged.static
+          file chntpw/reged.static
+          aarch64-linux-gnu-readelf -l chntpw/reged.static | grep -qv INTERP
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: reged-static-aarch64
+          path: chntpw/reged.static
+          if-no-files-found: error

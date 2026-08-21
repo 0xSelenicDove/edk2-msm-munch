@@ -209,8 +209,14 @@ MunchOtgDxeEntryPoint (
       return Status;
     }
 
-    if ((TypecStatus & (TYPEC_CC_ATTACHED | TYPEC_DEBOUNCE_DONE)) ==
-        (TYPEC_CC_ATTACHED | TYPEC_DEBOUNCE_DONE)) {
+    if ((TypecStatus & (TYPEC_VBUS_STATUS | TYPEC_VBUS_ERROR)) != 0) {
+      DEBUG ((DEBUG_ERROR, "MunchOtgDxe: external/error VBUS present (0x%02x), refusing source mode\n",
+              TypecStatus));
+      return EFI_ACCESS_DENIED;
+    }
+
+    if ((TypecStatus & (TYPEC_CC_ATTACHED | TYPEC_DEBOUNCE_DONE | TYPEC_DFP_MODE)) ==
+        (TYPEC_CC_ATTACHED | TYPEC_DEBOUNCE_DONE | TYPEC_DFP_MODE)) {
       break;
     }
 
@@ -219,14 +225,8 @@ MunchOtgDxeEntryPoint (
 
   if ((TypecStatus & (TYPEC_CC_ATTACHED | TYPEC_DEBOUNCE_DONE | TYPEC_DFP_MODE)) !=
       (TYPEC_CC_ATTACHED | TYPEC_DEBOUNCE_DONE | TYPEC_DFP_MODE)) {
-    DEBUG ((DEBUG_WARN, "MunchOtgDxe: no debounced DFP attachment (0x%02x)\n", TypecStatus));
-    return EFI_NOT_READY;
-  }
-
-  if ((TypecStatus & (TYPEC_VBUS_STATUS | TYPEC_VBUS_ERROR)) != 0) {
-    DEBUG ((DEBUG_ERROR, "MunchOtgDxe: external/error VBUS present (0x%02x), refusing source mode\n",
+    DEBUG ((DEBUG_WARN, "MunchOtgDxe: CC role not initialized (0x%02x); controlled no-VBUS diagnostic continues\n",
             TypecStatus));
-    return EFI_ACCESS_DENIED;
   }
 
   Status = SpmiMaskedWriteByte (DCDC_OTG_CFG_REG, OTG_EN_SRC_CFG_BIT, 0);

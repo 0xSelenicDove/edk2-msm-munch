@@ -19,6 +19,18 @@ Device (URS0)
     Device (USB0)
     {
         Name (_ADR, Zero)
+        // Match the connector ID exposed by UCP0.CON0.
+        Name (_PLD, Package ()
+        {
+            Buffer ()
+            {
+                0x82, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00,
+                0x69, 0x0C, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00,
+                0xFF, 0xFF, 0xFF, 0xFF
+            }
+        })
         Name (_UPC, Package (0x04)
         {
             One,        // Connectable

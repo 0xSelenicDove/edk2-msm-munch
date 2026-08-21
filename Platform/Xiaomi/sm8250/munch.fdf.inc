@@ -20,4 +20,5 @@ FILE DRIVER = 5bd181db-0487-4f1a-ae73-820e165611b4 {
 }
 
 // Diagnostic guarded PM8150B OTG boost for pre-attached DFP devices.
+INF Platform/Xiaomi/sm8250/Drivers/MunchPmicVersionDxe/MunchPmicVersionDxe.inf
 INF Platform/Xiaomi/sm8250/Drivers/MunchOtgDxe/MunchOtgDxe.inf

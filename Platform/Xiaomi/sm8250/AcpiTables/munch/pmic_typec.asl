@@ -138,11 +138,12 @@ Device (PEP0)
 // boot-only GenPass driver instead of Qualcomm's functional QCOM257D driver.
 // Use a new ACPI name and UID whenever changing the dependency contract so
 // Windows cannot reuse a previously failed QCOM257D devnode without retrying
-// its driver start. UCP2 was the failed provider-less test.
-Device (UCP3)
+// its driver start. UCP2 lacked the PMIC-extension provider; UCP3 then failed
+// because URS0 was allowed to start before the Type-C port manager.
+Device (UCP4)
 {
     Name (_HID, "QCOM257D")
-    Name (_UID, 0x03)
+    Name (_UID, 0x04)
     Name (_DEP, Package () { PEP0, PTCC })
 
     Device (CON0)

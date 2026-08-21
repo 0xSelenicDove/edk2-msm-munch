@@ -11,6 +11,11 @@ Device (URS0)
     Name (_UID, Zero)
     Name (_CCA, Zero)
 
+    // Qualcomm's Kona topology starts the role-switch controller only after
+    // the Type-C port manager is ready.  Starting UrsSynopsys first leaves
+    // qcusbctcpm unable to complete its initial power IRP.
+    Name (_DEP, Package () { PEP0, UCP4 })
+
     Name (_CRS, ResourceTemplate ()
     {
         Memory32Fixed (ReadWrite, 0x0A600000, 0x00100000)
@@ -19,7 +24,7 @@ Device (URS0)
     Device (USB0)
     {
         Name (_ADR, Zero)
-        // Match the connector ID exposed by UCP1.CON0.
+        // Match the connector ID exposed by UCP4.CON0.
         Name (_PLD, Package ()
         {
             Buffer ()

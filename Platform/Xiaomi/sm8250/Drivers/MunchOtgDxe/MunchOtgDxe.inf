@@ -1,0 +1,23 @@
+[Defines]
+  INF_VERSION                    = 0x0001001B
+  BASE_NAME                      = MunchOtgDxe
+  FILE_GUID                      = 4E0662E2-34D9-4E59-B5DF-3B3B102CA894
+  MODULE_TYPE                    = DXE_DRIVER
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = MunchOtgDxeEntryPoint
+
+[Sources]
+  MunchOtgDxe.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+
+[LibraryClasses]
+  BaseLib
+  DebugLib
+  IoLib
+  TimerLib
+  UefiDriverEntryPoint
+
+[Depex]
+  TRUE

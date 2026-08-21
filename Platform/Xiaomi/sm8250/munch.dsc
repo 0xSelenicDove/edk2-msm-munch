@@ -28,3 +28,6 @@
   gRenegadePkgTokenSpaceGuid.PcdDeviceVendor|"Xiaomi"
   gRenegadePkgTokenSpaceGuid.PcdDeviceProduct|"POCO F4 / Redmi K40S"
   gRenegadePkgTokenSpaceGuid.PcdDeviceCodeName|"munch"
+
+[Components.common]
+  Platform/Xiaomi/sm8250/Drivers/MunchOtgDxe/MunchOtgDxe.inf

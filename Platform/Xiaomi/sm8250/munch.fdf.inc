@@ -18,3 +18,6 @@ FILE DRIVER = 5bd181db-0487-4f1a-ae73-820e165611b4 {
   SECTION PE32 = Platform/Xiaomi/sm8250/Drivers/ntfs_aa64.efi
   SECTION UI = "NtfsDxe"
 }
+
+// Diagnostic guarded PM8150B OTG boost for pre-attached DFP devices.
+INF Platform/Xiaomi/sm8250/Drivers/MunchOtgDxe/MunchOtgDxe.inf

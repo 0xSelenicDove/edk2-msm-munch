@@ -17,7 +17,9 @@
   DebugLib
   IoLib
   TimerLib
+  UefiBootServicesTableLib
   UefiDriverEntryPoint
+  UefiLib
 
 [Depex]
   TRUE

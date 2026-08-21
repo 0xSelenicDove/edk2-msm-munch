@@ -1,8 +1,11 @@
 #include <Uefi.h>
 
+#include <Guid/EventGroup.h>
 #include <Library/DebugLib.h>
 #include <Library/IoLib.h>
 #include <Library/TimerLib.h>
+#include <Library/UefiBootServicesTableLib.h>
+#include <Library/UefiLib.h>
 
 #define PMIC_ARB_CORE_BASE        0x0C440000U
 #define PMIC_ARB_CHNLS_BASE       0x0C600000U
@@ -39,6 +42,11 @@
 #define DCDC_OTG_CFG_REG          0x1153U
 #define OTG_EN_BIT                BIT0
 #define OTG_EN_SRC_CFG_BIT        BIT1
+
+STATIC UINT32 mDiagVersion;
+STATIC UINT8  mDiagTypecStatus;
+STATIC UINT8  mDiagOtgConfig;
+STATIC UINT8  mDiagOtgCommand;
 
 STATIC
 INT32
@@ -176,11 +184,10 @@ SpmiMaskedWriteByte (
   return SpmiWriteByte (Address, Current);
 }
 
+STATIC
 EFI_STATUS
-EFIAPI
-MunchOtgDxeEntryPoint (
-  IN EFI_HANDLE        ImageHandle,
-  IN EFI_SYSTEM_TABLE  *SystemTable
+EnableMunchOtg (
+  VOID
   )
 {
   EFI_STATUS Status;
@@ -190,12 +197,11 @@ MunchOtgDxeEntryPoint (
   UINT8      OtgConfig;
   UINT8      OtgCommand;
 
-  (VOID)ImageHandle;
-  (VOID)SystemTable;
   OtgConfig  = 0;
   OtgCommand = 0;
 
   Version = MmioRead32 (PMIC_ARB_CORE_BASE + PMIC_ARB_VERSION);
+  mDiagVersion = Version;
   if ((Version & 0xF0000000U) != 0x50000000U) {
     DEBUG ((DEBUG_ERROR, "MunchOtgDxe: unsupported PMIC arbiter 0x%08x\n", Version));
     return EFI_UNSUPPORTED;
@@ -204,6 +210,7 @@ MunchOtgDxeEntryPoint (
   TypecStatus = 0;
   for (Retry = 0; Retry < 100; Retry++) {
     Status = SpmiReadByte (TYPE_C_STATUS_4_REG, &TypecStatus);
+    mDiagTypecStatus = TypecStatus;
     if (EFI_ERROR (Status)) {
       DEBUG ((DEBUG_ERROR, "MunchOtgDxe: Type-C status read failed: %r\n", Status));
       return Status;
@@ -243,8 +250,10 @@ MunchOtgDxeEntryPoint (
 
   MicroSecondDelay (20000);
   Status = SpmiReadByte (DCDC_OTG_CFG_REG, &OtgConfig);
+  mDiagOtgConfig = OtgConfig;
   if (!EFI_ERROR (Status)) {
     Status = SpmiReadByte (DCDC_CMD_OTG_REG, &OtgCommand);
+    mDiagOtgCommand = OtgCommand;
   }
 
   if (EFI_ERROR (Status) || ((OtgConfig & OTG_EN_SRC_CFG_BIT) != 0) ||
@@ -256,4 +265,47 @@ MunchOtgDxeEntryPoint (
 
   DEBUG ((DEBUG_INFO, "MunchOtgDxe: guarded PM8150B OTG boost enabled\n"));
   return EFI_SUCCESS;
+}
+
+STATIC
+VOID
+EFIAPI
+MunchOtgReadyToBoot (
+  IN EFI_EVENT Event,
+  IN VOID      *Context
+  )
+{
+  EFI_STATUS Status;
+
+  (VOID)Context;
+  gBS->CloseEvent (Event);
+
+  Status = EnableMunchOtg ();
+  Print (L"\r\nMunch OTG: arb=%08x typec=%02x result=%r cfg=%02x cmd=%02x\r\n",
+         mDiagVersion, mDiagTypecStatus, Status, mDiagOtgConfig,
+         mDiagOtgCommand);
+  Print (L"Keep OTG attached. Diagnostic continues in 3 seconds.\r\n");
+  MicroSecondDelay (3000000);
+}
+
+EFI_STATUS
+EFIAPI
+MunchOtgDxeEntryPoint (
+  IN EFI_HANDLE        ImageHandle,
+  IN EFI_SYSTEM_TABLE  *SystemTable
+  )
+{
+  EFI_EVENT Event;
+
+  (VOID)ImageHandle;
+  (VOID)SystemTable;
+
+  return gBS->CreateEventEx (
+                EVT_NOTIFY_SIGNAL,
+                TPL_CALLBACK,
+                MunchOtgReadyToBoot,
+                NULL,
+                &gEfiEventReadyToBootGuid,
+                &Event
+                );
 }

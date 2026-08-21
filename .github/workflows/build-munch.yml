@@ -60,8 +60,10 @@ jobs:
         run: |
           mkdir -p artifacts
           cp -v Build/munch/RELEASE_CLANG38/FV/SM8250_UEFI.fd artifacts/SM8250_UEFI.fd 2>/dev/null || true
-          find Build/munch/RELEASE_CLANG38 -type f -name 'SimpleInitMain.efi' -exec cp -v '{}' artifacts/SimpleInitMain.efi \; -quit
-          find Build/munch/RELEASE_CLANG38 -type f -name 'Reboot2PayloadApp.efi' -exec cp -v '{}' artifacts/Reboot2PayloadApp.efi \; -quit
+          find workspace/Build/munch Build/munch -type f -name 'SimpleInitMain.efi' -exec cp -v '{}' artifacts/SimpleInitMain.efi \; -quit 2>/dev/null || true
+          find workspace/Build/munch Build/munch -type f -name 'Reboot2PayloadApp.efi' -exec cp -v '{}' artifacts/Reboot2PayloadApp.efi \; -quit 2>/dev/null || true
+          test -s artifacts/SimpleInitMain.efi
+          test -s artifacts/Reboot2PayloadApp.efi
           cp -v Platform/Xiaomi/sm8250/munch.multiboot.uefi.conf artifacts/simpleinit.static.uefi.cfg
           cp -v boot-*.img artifacts/ 2>/dev/null || true
           cp -v uefi-installer-*.zip artifacts/ 2>/dev/null || true

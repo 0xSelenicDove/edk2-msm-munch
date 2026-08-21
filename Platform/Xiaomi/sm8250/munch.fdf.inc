@@ -5,6 +5,8 @@ FILE FREEFORM = 7E374E25-8E01-4FEE-87F2-390C23C606CD {
   SECTION RAW = Silicon/Qualcomm/sm8250/AcpiTables/Facp.aml
   SECTION RAW = Silicon/Qualcomm/sm8250/AcpiTables/Gtdt.aml
   SECTION RAW = Silicon/Qualcomm/sm8250/AcpiTables/bgrt.aml
+  # USB-only IORT: apps SMMU plus the primary controller's SID mapping.
+  SECTION RAW = Silicon/Qualcomm/sm8250/AcpiTables/IortUsb.aml
   SECTION UI = "AcpiTables"
 }
 

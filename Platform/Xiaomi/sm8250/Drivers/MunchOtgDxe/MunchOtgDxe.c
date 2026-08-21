@@ -16,7 +16,7 @@
 #define PMIC_ARB_FEATURES         0x0004U
 #define PMIC_ARB_APID_MAP_BASE    0x0900U
 #define PMIC_ARB_APID_OWNER_BASE  0x0700U
-#define PMIC_ARB_MAX_APIDS        128U
+#define PMIC_ARB_MAX_APIDS        512U
 
 #define PMIC_ARB_CMD              0x00U
 #define PMIC_ARB_STATUS           0x08U
@@ -44,9 +44,14 @@
 #define OTG_EN_SRC_CFG_BIT        BIT1
 
 STATIC UINT32 mDiagVersion;
+STATIC UINT32 mDiagApidCount;
 STATIC UINT8  mDiagTypecStatus;
 STATIC UINT8  mDiagOtgConfig;
 STATIC UINT8  mDiagOtgCommand;
+STATIC INT32  mDiagTypecApid = -1;
+STATIC INT32  mDiagDcdcApid  = -1;
+STATIC UINT32 mDiagTypecOwner = MAX_UINT32;
+STATIC UINT32 mDiagDcdcOwner  = MAX_UINT32;
 
 STATIC
 INT32
@@ -63,6 +68,7 @@ FindApid (
   if ((Count == 0) || (Count > PMIC_ARB_MAX_APIDS)) {
     Count = PMIC_ARB_MAX_APIDS;
   }
+  mDiagApidCount = Count;
 
   FirstMatch = -1;
   for (Index = 0; Index < Count; Index++) {
@@ -129,6 +135,18 @@ SpmiReadByte (
     return EFI_NOT_FOUND;
   }
 
+  if ((Address >> 8) == (TYPE_C_STATUS_4_REG >> 8)) {
+    mDiagTypecApid = Apid;
+    mDiagTypecOwner = MmioRead32 (PMIC_ARB_CONFIG_BASE +
+                                  PMIC_ARB_APID_OWNER_BASE +
+                                  ((UINT32)Apid * sizeof (UINT32))) & 0x7U;
+  } else if ((Address >> 8) == (DCDC_CMD_OTG_REG >> 8)) {
+    mDiagDcdcApid = Apid;
+    mDiagDcdcOwner = MmioRead32 (PMIC_ARB_CONFIG_BASE +
+                                 PMIC_ARB_APID_OWNER_BASE +
+                                 ((UINT32)Apid * sizeof (UINT32))) & 0x7U;
+  }
+
   Channel = PMIC_ARB_OBSERVER_BASE + (0x80U * (UINT32)Apid);
   Command = (PMIC_ARB_OP_EXT_READL << 27) | ((Address & 0xFFU) << 4);
   MmioWrite32 (Channel + PMIC_ARB_CMD, Command);
@@ -155,6 +173,13 @@ SpmiWriteByte (
   Apid = FindApid ((UINT16)((PM8150B_SID << 8) | (Address >> 8)), TRUE);
   if (Apid < 0) {
     return EFI_ACCESS_DENIED;
+  }
+
+  if ((Address >> 8) == (DCDC_CMD_OTG_REG >> 8)) {
+    mDiagDcdcApid = Apid;
+    mDiagDcdcOwner = MmioRead32 (PMIC_ARB_CONFIG_BASE +
+                                 PMIC_ARB_APID_OWNER_BASE +
+                                 ((UINT32)Apid * sizeof (UINT32))) & 0x7U;
   }
 
   Channel = PMIC_ARB_CHNLS_BASE + (0x10000U * (UINT32)Apid);
@@ -284,6 +309,9 @@ MunchOtgReadyToBoot (
   Print (L"\r\nMunch OTG: arb=%08x typec=%02x result=%r cfg=%02x cmd=%02x\r\n",
          mDiagVersion, mDiagTypecStatus, Status, mDiagOtgConfig,
          mDiagOtgCommand);
+  Print (L"APIDs: count=%u typec=%d/owner%u dcdc=%d/owner%u\r\n",
+         mDiagApidCount, mDiagTypecApid, mDiagTypecOwner,
+         mDiagDcdcApid, mDiagDcdcOwner);
   Print (L"Keep OTG attached. Diagnostic continues in 3 seconds.\r\n");
   MicroSecondDelay (3000000);
 }

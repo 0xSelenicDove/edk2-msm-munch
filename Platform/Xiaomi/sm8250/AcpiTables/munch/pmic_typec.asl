@@ -127,11 +127,13 @@ Device (PEP0)
 //
 // Do not advertise QCOMFFE4 here. Windows binds that compatible ID to its
 // boot-only GenPass driver instead of Qualcomm's functional QCOM257D driver.
-// UCP1 also creates a fresh PnP instance after removing that old binding.
-Device (UCP1)
+// Use a new ACPI name and UID whenever changing the dependency contract so
+// Windows cannot reuse a previously failed QCOM257D devnode without retrying
+// its driver start.
+Device (UCP2)
 {
     Name (_HID, "QCOM257D")
-    Name (_UID, One)
+    Name (_UID, 0x02)
     Name (_DEP, Package () { PEP0, PTCC })
 
     Device (CON0)

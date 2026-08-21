@@ -49,6 +49,15 @@ Device (PMIC)
     }
 }
 
+// qcpmicext8250.sys publishes the PMIC I/O interfaces consumed by PTCC.
+// Without this QCOM25CE device, qcpmictcc retains a NULL WDF target and
+// bugchecks as soon as a Type-C attach interrupt arrives.
+Device (PEXT)
+{
+    Name (_HID, "QCOM25CE")
+    Name (_DEP, Package () { SPMI, PMIC })
+}
+
 // PMIC GPIO controller.  PTCC interrupts are expressed as virtual PMIC GPIO
 // pins, so this device must enumerate before the Type-C controller.
 Device (PM01)
@@ -84,7 +93,7 @@ Device (PM01)
 Device (PTCC)
 {
     Name (_HID, "QCOM2582")
-    Name (_DEP, Package () { PMIC, PM01 })
+    Name (_DEP, Package () { PMIC, PEXT, PM01 })
     Name (_CRS, ResourceTemplate ()
     {
         GpioInt (Edge, ActiveHigh, SharedAndWake, PullNone, 0,
@@ -129,11 +138,11 @@ Device (PEP0)
 // boot-only GenPass driver instead of Qualcomm's functional QCOM257D driver.
 // Use a new ACPI name and UID whenever changing the dependency contract so
 // Windows cannot reuse a previously failed QCOM257D devnode without retrying
-// its driver start.
-Device (UCP2)
+// its driver start. UCP2 was the failed provider-less test.
+Device (UCP3)
 {
     Name (_HID, "QCOM257D")
-    Name (_UID, 0x02)
+    Name (_UID, 0x03)
     Name (_DEP, Package () { PEP0, PTCC })
 
     Device (CON0)

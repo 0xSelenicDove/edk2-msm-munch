@@ -114,10 +114,14 @@ Device (PTCC)
 
 // Windows USB Type-C port manager.  CON0 and URS0.USB0 deliberately carry
 // identical _PLD data so UcmCx associates the physical connector with xHCI.
-Device (UCP0)
+//
+// Do not advertise QCOMFFE4 here. Windows binds that compatible ID to its
+// boot-only GenPass driver instead of Qualcomm's functional QCOM257D driver.
+// UCP1 also creates a fresh PnP instance after removing that old binding.
+Device (UCP1)
 {
     Name (_HID, "QCOM257D")
-    Name (_CID, "QCOMFFE4")
+    Name (_UID, One)
     Name (_DEP, Package () { PTCC })
 
     Device (CON0)

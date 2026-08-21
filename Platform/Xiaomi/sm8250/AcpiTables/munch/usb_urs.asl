@@ -19,7 +19,7 @@ Device (URS0)
     Device (USB0)
     {
         Name (_ADR, Zero)
-        // Match the connector ID exposed by UCP0.CON0.
+        // Match the connector ID exposed by UCP1.CON0.
         Name (_PLD, Package ()
         {
             Buffer ()

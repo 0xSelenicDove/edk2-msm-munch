@@ -197,19 +197,12 @@ READ_LOCK_STATUS   = TRUE
   INF MdeModulePkg/Application/UiApp/UiApp.inf
   INF Platform/RenegadePkg/Drivers/LogoDxe/LogoDxe.inf
 
-!if $(MUNCH_MULTIBOOT) == TRUE
+!if $(MUNCH_EXTERNAL_MENU) == TRUE
   #
-  # Redmi K40S startup menu and Android/TWRP chainloader support.
+  # Only the small DT helper must start inside UEFI.  The graphical menu and
+  # reboot application are stored on the ESP to keep the ABL payload small.
   #
-  INF src/main/SimpleInitMain.inf
   INF src/kernelfdt/KernelFdtDxe.inf
-
-  FILE FREEFORM = 4b0364cf-1c5b-47aa-9073-d7b5039ce49b {
-    SECTION RAW = Platform/Xiaomi/sm8250/munch.multiboot.uefi.conf
-    SECTION UI = "simpleinit.static.uefi.cfg"
-  }
-
-  INF Platform/RenegadePkg/Application/Reboot2PayloadApp/Reboot2PayloadApp.inf
 !endif
 
 !if $(AB_SLOTS_SUPPORT) == TRUE
@@ -218,7 +211,7 @@ READ_LOCK_STATUS   = TRUE
 !endif
 
 !if $(ENABLE_LINUX_UTILS) == 1
-!ifndef $(MUNCH_MULTIBOOT)
+!if $(MUNCH_EXTERNAL_MENU) != TRUE
   FILE FREEFORM = 4b0364cf-1c5b-47aa-9073-d7b5039ce49b {
     SECTION RAW = tools/simpleinit.static.uefi.cfg
     SECTION UI = "simpleinit.static.uefi.cfg"

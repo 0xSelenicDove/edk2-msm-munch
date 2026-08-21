@@ -30,8 +30,10 @@
 
 #define PM8150B_SID               2U
 #define PM8150B_DCDC_PPID         0x211U
-#define PM8150B_TYPEC_PPID        0x215U
-#define TYPE_C_STATUS_4_REG       0x150EU
+#define PM8150B_TYPEC_PPID        0x213U
+#define USBIN_PERPH_TYPE_REG      0x1304U
+#define USBIN_PERPH_SUBTYPE_REG   0x1305U
+#define TYPE_C_STATUS_4_REG       0x130EU
 #define TYPEC_DFP_MODE            BIT7
 #define TYPEC_VBUS_STATUS         BIT6
 #define TYPEC_VBUS_ERROR          BIT5
@@ -45,6 +47,8 @@
 
 STATIC UINT32 mDiagVersion;
 STATIC UINT32 mDiagApidCount;
+STATIC UINT8  mDiagUsbType;
+STATIC UINT8  mDiagUsbSubtype;
 STATIC UINT8  mDiagTypecStatus;
 STATIC UINT8  mDiagOtgConfig;
 STATIC UINT8  mDiagOtgCommand;
@@ -232,6 +236,19 @@ EnableMunchOtg (
     return EFI_UNSUPPORTED;
   }
 
+  Status = SpmiReadByte (USBIN_PERPH_TYPE_REG, &mDiagUsbType);
+  if (!EFI_ERROR (Status)) {
+    Status = SpmiReadByte (USBIN_PERPH_SUBTYPE_REG, &mDiagUsbSubtype);
+  }
+
+  if (EFI_ERROR (Status) || (mDiagUsbType == 0xFFU) ||
+      (mDiagUsbSubtype == 0xFFU)) {
+    DEBUG ((DEBUG_ERROR,
+            "MunchOtgDxe: invalid USBIN identity type=0x%02x subtype=0x%02x: %r\n",
+            mDiagUsbType, mDiagUsbSubtype, Status));
+    return EFI_DEVICE_ERROR;
+  }
+
   TypecStatus = 0;
   for (Retry = 0; Retry < 100; Retry++) {
     Status = SpmiReadByte (TYPE_C_STATUS_4_REG, &TypecStatus);
@@ -309,8 +326,9 @@ MunchOtgReadyToBoot (
   Print (L"\r\nMunch OTG: arb=%08x typec=%02x result=%r cfg=%02x cmd=%02x\r\n",
          mDiagVersion, mDiagTypecStatus, Status, mDiagOtgConfig,
          mDiagOtgCommand);
-  Print (L"APIDs: count=%u typec=%d/owner%u dcdc=%d/owner%u\r\n",
+  Print (L"APIDs: count=%u typec=%d/owner%u usb=%02x/%02x dcdc=%d/owner%u\r\n",
          mDiagApidCount, mDiagTypecApid, mDiagTypecOwner,
+         mDiagUsbType, mDiagUsbSubtype,
          mDiagDcdcApid, mDiagDcdcOwner);
   Print (L"Keep OTG attached. Diagnostic continues in 3 seconds.\r\n");
   MicroSecondDelay (3000000);

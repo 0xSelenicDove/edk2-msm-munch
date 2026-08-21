@@ -112,6 +112,16 @@ Device (PTCC)
     })
 }
 
+// Qualcomm's USB Type-C port manager registers with PoFx during device start.
+// The Kona reference makes that device dependent on the platform extension
+// plug-in (PEP); without it qcusbctcpm fails Code 10 with
+// STATUS_DEVICE_POWER_FAILURE even though PTCC itself starts successfully.
+Device (PEP0)
+{
+    Name (_HID, "QCOM2519")
+    Name (_CID, "PNP0D80")
+}
+
 // Windows USB Type-C port manager.  CON0 and URS0.USB0 deliberately carry
 // identical _PLD data so UcmCx associates the physical connector with xHCI.
 //
@@ -122,7 +132,7 @@ Device (UCP1)
 {
     Name (_HID, "QCOM257D")
     Name (_UID, One)
-    Name (_DEP, Package () { PTCC })
+    Name (_DEP, Package () { PEP0, PTCC })
 
     Device (CON0)
     {

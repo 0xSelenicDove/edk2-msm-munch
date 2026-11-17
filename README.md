@@ -47,6 +47,8 @@
 | **USB-C Keyboard (OTG)** | `ESC` / `Win` | Enter UEFI Setup Menu |
 
 > [!NOTE]
+> The key mapping above is the intended design and has **not been verified on `munch`** (no `ButtonsDxe` is included). USB-C keyboard does not work until USB is brought up.
+>
 > When the boot screen displays *"Press Windows key for UEFI settings"*, on the physical phone you simply press **Volume Up**.
 
 ---
@@ -108,19 +110,26 @@ bcdedit /store BCD /set {default} bootstatuspolicy IgnoreAllFailures
 
 ---
 
-## 📊 Windows 11 ARM Feature Status (POCO F4)
+## 📊 Current Status (Windows 11 ARM on POCO F4)
+
+> [!WARNING]
+> **Work in progress — boots, but not yet usable.** Windows 11 ARM64 reaches the desktop path, but there is **no touch input and no USB** (so no keyboard/mouse via OTG either). Earlier revisions of this table marked most hardware as working; that was inaccurate and has been corrected below.
 
 | Component | Status | Details |
 | :--- | :--- | :--- |
-| **UEFI Bootloader** | 🟢 **Working** | Tianocore EDK2 with ACPI & DTB support |
-| **Display & GPU** | 🟢 **Working** | Adreno 650 with full DirectX & GPU acceleration |
-| **Touchscreen** | 🟢 **Working** | Goodix / FocalTech Touch I2C Driver |
-| **UFS Storage** | 🟢 **Working** | Qualcomm UFS 3.1 Controller |
-| **Wi-Fi & Bluetooth** | 🟢 **Working** | WCN3990 / QCA6390 subsystem |
-| **Audio** | 🟢 **Working** | Qualcomm WCD9385 Codec & Speakers |
-| **USB-C OTG & Charging** | 🟢 **Working** | DWC3 Controller with Host & Peripheral support |
-| **Battery & Charging** | 🟢 **Working** | SMB1396 / SPMI Fuel Gauge |
-| **Cellular (LTE/5G)** | 🟡 **Work in progress** | Requires QMI/MBIM modem firmware configuration |
+| **UEFI firmware / boot** | 🟢 **Working** | Boots, mounts ESP + NTFS, hands off to `bootmgfw.efi` |
+| **Display (GOP framebuffer)** | 🟢 **Working** | 1080 × 2400 framebuffer at `0x9c000000` |
+| **UFS Storage** | 🟢 **Working** | Exposed to Windows via `ufs.asl` |
+| **Touchscreen** | 🔴 **Not working** | No touch device in the ACPI DSDT (no I²C/SPI bus, GPIO or touch nodes) |
+| **USB-C (host / OTG / peripheral)** | 🔴 **Not working** | No USB controller in the DSDT, so Windows cannot enumerate it |
+| **Physical keys in UEFI** | ❓ **Unverified** | No `ButtonsDxe` is wired into `munch.fdf.inc` |
+| **GPU / Wi-Fi / Bluetooth / Audio / Battery / Cellular** | ⚪ **Not started** | Need ACPI nodes and drivers that are not present yet |
+
+### Why touch and USB don't work
+The `munch` port was created by copying the **Poco F3 (`alioth`)** files:
+`FdtBlob_compat/munch.dtb` and `AcpiTables/munch/DSDT.aml` are byte-identical to the `alioth` ones, and the DSDT only declares UFS and PEP/LPI. Windows only sees devices the DSDT describes, so nothing else exists for it to load drivers on.
+
+See [docs/touch-usb-investigation.md](docs/touch-usb-investigation.md) for the detailed analysis and the plan for bringing up USB and touch.
 
 ---
 

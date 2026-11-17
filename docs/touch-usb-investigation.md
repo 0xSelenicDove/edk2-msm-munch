@@ -58,8 +58,28 @@ Independent of the above: Windows needs a USB controller in the DSDT. Relevant M
 ### Environment note
 `iasl`, `dtc` and a toolchain aren't installed on this Mac, so ACPI/DTB edits must be built in CI or a Linux box.
 
-## Boot menu (SimpleInit) — uncommitted change set
+## Boot menu (SimpleInit) — REVERTED (bootloops, see boot-test results below)
 - `ButtonsDxe` (volume/power keys) depends on `PmicGpioProtocol`/`PmicPONProtocol`, both from `PmicDxe`. With `PmicDxe` disabled, keys cannot work either. Same root cause as USB.
 - Re-enabled: `PmicDxe` (Apriori + dxe), `SimpleInitMain` + `KernelFdtDxe` in `sm8250.fdf`; Windows boot option is now appended after SimpleInit so the menu comes first.
 - "Reboot to Android" needs the installer-zip build (`ENABLE_LINUX_UTILS=1`), which CI already produces.
 - Untested: build not run locally (no toolchain), nothing flashed. If `PmicDxe` crashes again (the old `DebugLib.c +78` assert), keys and menu navigation will not work.
+
+## Real munch hardware data (pulled from a live phone, 2026-11-17)
+Source: `/sys/firmware/fdt` on a stock Android 14 / kernel 4.19.157 munch (`22021211RG`, hwc CN). `munch.dtb` now contains this real tree instead of the alioth copy (the model string is now `xiaomi munch`). The DSDT is still the alioth copy.
+
+| Item | munch (live DT) | alioth (old copy) |
+| :--- | :--- | :--- |
+| Touch | FocalTech `focaltech,fts` on **SPI** `qupv3_se4_spi` (`spi@990000`), reset GPIO 33, IRQ GPIO 39, 10 points | focaltech on a different bus/pins |
+| USB | `ssusb@a600000` (usb0) and `ssusb@a800000` (usb1), both `dr_mode = "drd"`, `qcom,dwc-usb3-msm`; PD PHY `qcom,usb-pdphy@1700` | same controllers, board wiring differs |
+| Fuel gauge / charger | **external TI `bq27z561` gauge + `bq2597x` master/slave chargers** + `smb1390`; PM8150B `qcom,qpnp-smb5` and `fg-gen4` nodes also present | internal `fg-gen4`, `bq2597x-standalone` |
+| RAM | 0x80000000 size 0x39900000, 0x200000000 size 0x180000000, 0xC0000000 size 0x140000000 (~12 GB) | 0x80000000 size 0x3bb00000, 0xC0000000 size 0x1c0000000 (~8 GB) |
+
+### Implications
+- **Touch:** Windows needs a SPI bus node (QUP SE4 at 0x990000) plus a GPIO controller, then the FocalTech device with those pins. It is SPI, not I2C, so I2C-based examples in the tree do not apply.
+- **PmicDxe crash (hypothesis):** `PmicDxe` has fuel-gauge/battery-profile code (`PmicFgBattProfileTokenPtrArrCallBack`, "Reading Profile Match"). munch reads its battery through an external `bq27z561`, which is a plausible reason the PMIC battery path fails. Not verified.
+- **Memory map:** `PlatformMemoryMapLib.c` is still alioth-shaped and ends at 8 GB. munch has ~12 GB laid out differently, which may relate to the earlier MEMORY_MANAGEMENT BSOD.
+
+### Boot-test results (2026-11-17)
+- The plain `boot-munch.img` (boot header v1, 2048-byte page) is rejected by the bootloader: `fastboot boot` gives "Load Error" for older builds, and flashing it falls back to fastboot. Stock boot is header v3 (4096-byte page). Use the installer ZIP, which patches the real boot image.
+- With `PmicDxe` re-enabled the phone bootloops: on-screen "…back registration failed, Status = 0x8000000000000003" followed by `PmicDxe` `ASSERT DebugLib.c +78: Format != ((void *) 0)`.
+- Stock `boot_a` is backed up (not in git); Android was restored.

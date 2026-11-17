@@ -736,12 +736,7 @@ VOID EFIAPI PlatformBootManagerAfterConsole(VOID)
               LoadOptionTypeBoot, LOAD_OPTION_ACTIVE,
               L"Windows Boot Manager", DevicePath, NULL, 0);
           if (!EFI_ERROR(Status)) {
-#ifdef ENABLE_SIMPLE_INIT
-            // Keep Simple Init (boot menu) first; Windows is chosen from it.
-            EfiBootManagerAddLoadOptionVariable(&WinBootOption, MAX_UINTN);
-#else
             EfiBootManagerAddLoadOptionVariable(&WinBootOption, 0);
-#endif
             EfiBootManagerFreeLoadOption(&WinBootOption);
           }
         }

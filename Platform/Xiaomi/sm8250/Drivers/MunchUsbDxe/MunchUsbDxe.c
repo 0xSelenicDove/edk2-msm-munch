@@ -217,7 +217,7 @@ MunchUsbReadyToBoot (
   SwitchToHost ();
 
   // Give time to read or photograph the screen.
-  MicroSecondDelay (8000000);
+  MicroSecondDelay (3000000);
 }
 
 EFI_STATUS

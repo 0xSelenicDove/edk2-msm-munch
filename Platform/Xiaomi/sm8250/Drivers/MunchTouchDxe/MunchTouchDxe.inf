@@ -1,0 +1,28 @@
+[Defines]
+  INF_VERSION                    = 0x0001001B
+  BASE_NAME                      = MunchTouchDxe
+  FILE_GUID                      = 5E0A93B2-7C1D-4F8E-B3A6-29D4E1C07F58
+  MODULE_TYPE                    = DXE_DRIVER
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = MunchTouchDxeEntryPoint
+
+[Sources]
+  MunchTouchDxe.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+
+[LibraryClasses]
+  BaseLib
+  DebugLib
+  IoLib
+  TimerLib
+  UefiBootServicesTableLib
+  UefiDriverEntryPoint
+  UefiLib
+
+[Guids]
+  gEfiEventReadyToBootGuid
+
+[Depex]
+  TRUE

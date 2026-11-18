@@ -159,7 +159,7 @@
 #define DMA_GENERAL_CFG       0xE30U
 
 #define M_CMD_DONE            BIT0
-#define SPI_TX_RX_OPCODE      7U
+#define SPI_TX_RX_OPCODE      3U             // full duplex = TX_ONLY | RX_ONLY (7 is "TX then RX", not full duplex)
 #define SPI_PROTOCOL          1U
 
 #define SPI_DIV               4U             // 19.2 MHz / 4 = 4.8 MHz (device tree allows 6 MHz)
@@ -990,7 +990,7 @@ MunchTouchReadyToBoot (
     UINT32  LbIrq;
     UINT32  Variant;
 
-    for (Variant = 0; Variant < 2; Variant++) {
+    for (Variant = 0; Variant < 1; Variant++) {
       SetMem (LbRx, sizeof (LbRx), 0xEE);
       SE_WRITE (SPI_LOOPBACK, 1);
       S1 = GeniTransfer (LbTx, LbRx, 4, &LbIrq, Variant == 1);

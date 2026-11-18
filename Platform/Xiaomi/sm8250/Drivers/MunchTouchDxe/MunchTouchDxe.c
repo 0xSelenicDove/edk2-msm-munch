@@ -217,6 +217,44 @@ FindApid (
   return RequireWriteOwner ? -1 : FirstMatch;
 }
 
+/**
+  Print what the PMIC arbiter knows: version, and every APID that maps to SID 4/5 (pm8150l).
+**/
+STATIC
+VOID
+DumpApids (
+  VOID
+  )
+{
+  UINT32 Count;
+  UINT32 I;
+  UINT32 Hist[8];
+  UINT32 Shown;
+
+  Count = MmioRead32 (PMIC_ARB_CORE_BASE + PMIC_ARB_FEATURES) & 0x7FFU;
+  Print (L"  spmi: ver %08x feat %08x\r\n", MmioRead32 (PMIC_ARB_CORE_BASE), MmioRead32 (PMIC_ARB_CORE_BASE + PMIC_ARB_FEATURES));
+  if ((Count == 0) || (Count > PMIC_ARB_MAX_APIDS)) {
+    Count = PMIC_ARB_MAX_APIDS;
+  }
+  SetMem (Hist, sizeof (Hist), 0);
+  Shown = 0;
+  for (I = 0; I < Count; I++) {
+    UINT32 Map  = MmioRead32 (PMIC_ARB_CORE_BASE + PMIC_ARB_APID_MAP_BASE + I * 4);
+    UINT32 Ppid = (Map >> 8) & 0xFFFU;
+    if (Map == 0) {
+      continue;
+    }
+    Hist[(Ppid >> 8) & 7]++;
+    if ((((Ppid >> 8) == 4) || ((Ppid >> 8) == 5)) && ((Ppid & 0xFF) >= 0x40) && ((Ppid & 0xFF) <= 0x4F) && (Shown < 12)) {
+      Print (L"  apid %u map %08x ppid %03x own %u\r\n", I, Map, Ppid,
+             MmioRead32 (PMIC_ARB_CONFIG_BASE + PMIC_ARB_APID_OWNER_BASE + I * 4) & 7U);
+      Shown++;
+    }
+  }
+  Print (L"  apids/sid: %u %u %u %u %u %u %u %u (of %u)\r\n", Hist[0], Hist[1], Hist[2], Hist[3],
+         Hist[4], Hist[5], Hist[6], Hist[7], Count);
+}
+
 STATIC
 EFI_STATUS
 WaitForSpmi (
@@ -947,6 +985,8 @@ MunchTouchReadyToBoot (
   PinSetup (TLMM_SOUTH, TS_RESET_GPIO, PIN_CTL (0, 3, 3, 1));
   PinSetup (TLMM_SOUTH, TS_IRQ_GPIO, PIN_CTL (0, 3, 3, 0));
   MicroSecondDelay (5000);
+
+  DumpApids ();
 
   // Rails: 1.8 V I/O first, then 3.2 V core (same order as the Linux driver).
   PowerLdo (L"L1 ", LDO1_BASE);

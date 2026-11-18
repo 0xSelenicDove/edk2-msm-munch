@@ -687,7 +687,7 @@ RscInit (
     UINT32 En   = TcsRead (I, mR->CmdEnable);
     UINT32 Ctl  = TcsRead (I, mR->Control);
     Print (L"  tcs%u: cmd_enable %08x control %08x\r\n", I, En, Ctl);
-    if ((mTcs == 0xFFFFFFFFU) && (En == 0) && ((Ctl & (TCS_AMC_ENABLE | TCS_AMC_TRIGGER)) == 0)) {
+    if ((mTcs == 0xFFFFFFFFU) && (En == 0) && ((Ctl & TCS_AMC_TRIGGER) == 0)) {   // bootloader leaves AMC enable set
       mTcs = I;
     }
   }

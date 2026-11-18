@@ -14,7 +14,9 @@ DefinitionBlock("DSDT.AML", "DSDT", 0x02, "QCOMM ", "SDM850 ", 3)
 
         // PM8150B Type-C/OTG control path used to negotiate host mode and
         // switch on VBUS for the physical connector.
+        Include("pep_vars.asl")
         Include("pmic_typec.asl")
+        Include("pep.asl")
 
 		//
         // Buttons

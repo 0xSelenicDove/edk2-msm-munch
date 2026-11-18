@@ -38,3 +38,4 @@
   Platform/Xiaomi/sm8250/Drivers/MunchPmicVersionDxe/MunchPmicVersionDxe.inf
   Platform/Xiaomi/sm8250/Drivers/MunchOtgDxe/MunchOtgDxe.inf
   Platform/Xiaomi/sm8250/Drivers/MunchButtonsDxe/MunchButtonsDxe.inf
+  Platform/Xiaomi/sm8250/Drivers/MunchUsbDxe/MunchUsbDxe.inf

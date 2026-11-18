@@ -25,3 +25,6 @@ INF Platform/Xiaomi/sm8250/Drivers/MunchOtgDxe/MunchOtgDxe.inf
 
 // Volume/power key input read straight from the PM8150 (ButtonsDxe needs PmicDxe).
 INF Platform/Xiaomi/sm8250/Drivers/MunchButtonsDxe/MunchButtonsDxe.inf
+
+// Probe of the usb30_prim clock/power state (read-only for now).
+INF Platform/Xiaomi/sm8250/Drivers/MunchUsbDxe/MunchUsbDxe.inf

@@ -83,3 +83,10 @@ Source: `/sys/firmware/fdt` on a stock Android 14 / kernel 4.19.157 munch (`2202
 - The plain `boot-munch.img` (boot header v1, 2048-byte page) is rejected by the bootloader: `fastboot boot` gives "Load Error" for older builds, and flashing it falls back to fastboot. Stock boot is header v3 (4096-byte page). Use the installer ZIP, which patches the real boot image.
 - With `PmicDxe` re-enabled the phone bootloops: on-screen "…back registration failed, Status = 0x8000000000000003" followed by `PmicDxe` `ASSERT DebugLib.c +78: Format != ((void *) 0)`.
 - Stock `boot_a` is backed up (not in git); Android was restored.
+
+## Result: USB host works (2026-11-17)
+USB host now works in Windows (mouse verified). Summary of what mattered:
+- Bootloader state (probed on screen): usb30_prim GDSC on, resets released, master/sleep/AXI/PHY-aux clocks on, `mock_utmi_clk` off, DWC3 in device mode (`CURMOD 0`), `phy_pipe_clk` off.
+- Firmware `MunchUsbDxe`: enable `mock_utmi_clk` (GCC 0xF01C), QSCRATCH `GENERAL_CFG` UTMI-as-PIPE select, stop device controller, `GCTL.PRTCAPDIR = host`. xHCI then reads `HCIVERSION 0x0110`. GCC (0x100000) had to be added to the UEFI memory map.
+- Windows: `USB0` as `PNP0D10` with inbox usbxhci. Tried and rejected: `QCOM25A6` + qcxhcifilter8250 (CLOCK_WATCHDOG), with or without the extra wake interrupts and the IORT; URS/Type-C path (needs PEP); real PEP0 (qcpep fails add).
+- The earlier hangs were the controller still being in device mode, then the Qualcomm filter driver.

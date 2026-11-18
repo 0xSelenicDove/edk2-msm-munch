@@ -34,7 +34,7 @@
 * **Android ⇄ Windows choice:** Windows starts by default; the UEFI Boot Manager has a *Reboot to other slot* entry that switches to Android.
 * **Native File System Drivers:** `NtfsDxe`, `FatPkg` (`EnhancedFatDxe`), `ExfatDxe`, `Ext2Dxe`.
 * **Direct Windows ARM Loader:** BDS detects `\EFI\Microsoft\Boot\bootmgfw.efi` on the mounted filesystems.
-* **USB-C OTG power:** `MunchOtgDxe` enables the PM8150B OTG boost (VBUS) before boot. USB *data* is not working yet, see status below.
+* **USB host works:** `MunchOtgDxe` powers the port (VBUS) and `MunchUsbDxe` brings the USB controller up in host mode before Windows starts, so a **USB mouse/keyboard works in Windows** through Windows' standard xHCI driver.
 * **Fast status text:** 20 ms per line on the early framebuffer console.
 
 ---
@@ -118,7 +118,7 @@ bcdedit /store BCD /set {default} bootstatuspolicy IgnoreAllFailures
 ## 📊 Current Status (Windows 11 ARM on POCO F4)
 
 > [!WARNING]
-> **Work in progress.** Windows boots to the desktop and you can switch between Android and Windows at startup, but there is **no touch and no USB data**.
+> **Work in progress.** Windows boots to the desktop, a **USB mouse/keyboard works**, and you can switch between Android and Windows at startup. **Touchscreen does not work yet.**
 
 | Component | Status | Details |
 | :--- | :--- | :--- |
@@ -127,15 +127,20 @@ bcdedit /store BCD /set {default} bootstatuspolicy IgnoreAllFailures
 | **Boot menu + buttons** | 🟢 **Working** | Volume Up/Down + Power via `MunchButtonsDxe`; Android ⇄ Windows via A/B slots |
 | **Display (GOP framebuffer)** | 🟢 **Working** | 1080 × 2400 framebuffer at `0x9c000000` |
 | **UFS Storage** | 🟢 **Working** | `ufs.asl` |
-| **USB-C power (VBUS/OTG)** | 🟡 **Partial** | OTG light turns on (firmware `MunchOtgDxe`) |
-| **USB-C data** | 🔴 **Not working** | Windows Type-C manager (`QCOM257D`) fails to start with `0xC000009E` |
+| **USB-C host (mouse/keyboard)** | 🟢 **Working** | Firmware brings the controller up in host mode; Windows uses the inbox xHCI driver (`PNP0D10`). USB 2.0 only |
+| **USB-C power (VBUS/OTG)** | 🟢 **Working** | `MunchOtgDxe` enables the PM8150B OTG boost |
+| **USB-C device mode / role switching / USB 3.0** | 🔴 **Not working** | Needs the Type-C manager and a real PEP (see below) |
 | **Touchscreen** | 🔴 **Not working** | FocalTech on SPI (QUP SE4, reset GPIO33, IRQ GPIO39); needs bus/GPIO/PEP ACPI nodes |
 | **GPU / Wi-Fi / Bluetooth / Audio / Battery / Cellular** | ⚪ **Not started** | Need ACPI nodes and drivers that are not present yet |
 
-### Why touch and USB data don't work
-* Windows only sees devices the DSDT describes, and the Windows power controller (`PEP0`) is faked as a generic `PNP0D80`. A real Qualcomm `QCOM2519` node needs full SM8250 clock/power tables that this repo does not have.
-* The USB Type-C port manager driver (`qcusbctcpm`, `ACPI\QCOM257D`) therefore fails to start with `0xC000009E` (device power failure), so the USB role switch never starts. VBUS power works only because the firmware (`MunchOtgDxe`) turns it on.
-* Touch is a FocalTech chip on SPI with GPIO interrupt/reset; the Qualcomm bus/GPIO drivers have the same `PEP0` dependency.
+### How USB host was made to work
+* The bootloader leaves the USB controller powered, with most clocks running, but in **device mode** and with `mock_utmi_clk` off. Qualcomm's own USB bring-up driver (`UsbConfigDxe`) never runs on this platform because it waits for a protocol nothing provides.
+* `MunchUsbDxe` (firmware) enables the UTMI clock, selects UTMI as the PIPE clock (no USB 3.0 PHY is running, same trick as Linux `dwc3_qcom_select_utmi_clk`), stops the device controller and switches the core to host mode. It prints one status line before boot.
+* The DSDT exposes `USB0` as a plain ACPI xHCI (`PNP0D10`). Qualcomm's `qcxhcifilter` driver (`QCOM25A6`) hangs Windows with `CLOCK_WATCHDOG_TIMEOUT`, so it is not used.
+* Windows' own USB-C stack is not used either: the Type-C port manager and URS role switch depend on Qualcomm's PEP (power engine), and the real `QCOM2519` PEP fails to start (`CM_PROB_FAILED_ADD`) without full SM8250 clock/power tables. USB therefore only works as a host, USB 2.0 speed.
+
+### Why touch still doesn't work
+* The touchscreen is a FocalTech chip on SPI (QUP SE4, reset GPIO33, IRQ GPIO39). Windows needs the SPI bus, GPIO controller and PEP nodes for it; they have the same dependency on a working power controller.
 * Qualcomm's closed `PmicDxe` (taken from a different product) asserts and bootloops on munch, so it stays disabled; keys are read directly by `MunchButtonsDxe` instead.
 
 See [docs/touch-usb-investigation.md](docs/touch-usb-investigation.md) for the investigation notes.

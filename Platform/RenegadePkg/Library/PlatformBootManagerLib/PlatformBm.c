@@ -11,6 +11,7 @@
 **/
 
 #include <Guid/EventGroup.h>
+#include <Guid/GlobalVariable.h>
 #include <Guid/SerialPortLibVendor.h>
 #include <Guid/TtyTerm.h>
 #include <IndustryStandard/Pci22.h>
@@ -457,6 +458,17 @@ VOID PlatformRegisterOptionsAndKeys(VOID)
       &gSimpleInitFileGuid, L"Simple Init", LOAD_OPTION_ACTIVE);
   Status = EfiBootManagerAddKeyOptionVariable(
       NULL, (UINT16)OptionSimpleInit, 0, &UP, NULL);
+#ifdef ENABLE_AUTOMATIC_SIMPLE_INIT
+  // Consume BootNext once during this boot, then let SimpleInit launch the
+  // selected OS. Re-create it on the next cold boot so the menu is always
+  // reachable without changing the persistent BootOrder.
+  UINT16 SimpleInitBootNext = OptionSimpleInit;
+  gRT->SetVariable(
+      L"BootNext", &gEfiGlobalVariableGuid,
+      EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS |
+          EFI_VARIABLE_RUNTIME_ACCESS,
+      sizeof(SimpleInitBootNext), &SimpleInitBootNext);
+#endif
 #else
   Status = EfiBootManagerAddKeyOptionVariable(
       NULL, (UINT16)BootOption.OptionNumber, 0, &UP, NULL);
@@ -628,6 +640,7 @@ VOID EFIAPI PlatformBootManagerAfterConsole(VOID)
   //
   Status = BootLogoEnableLogo();
   if (EFI_ERROR(Status)) {
+#ifndef QUIET_PLATFORM_BOOT
     if (FirmwareVerLength > 0) {
       Print(VERSION_STRING_PREFIX L"%s\n", PcdGetPtr(PcdFirmwareVersionString));
     }
@@ -635,6 +648,7 @@ VOID EFIAPI PlatformBootManagerAfterConsole(VOID)
     Print(L"Press any side button for SimpleInitGUI");
 #else
     Print(L"Press any side button for Boot Options");
+#endif
 #endif
   }
   else if (FirmwareVerLength > 0) {
@@ -696,7 +710,9 @@ VOID EFIAPI PlatformBootManagerAfterConsole(VOID)
   Status = gBS->LocateHandleBuffer(
       ByProtocol, &gEfiSimpleFileSystemProtocolGuid, NULL, &FsNoHandles,
       &FsHandles);
+#ifndef QUIET_PLATFORM_BOOT
   Print(L"[UEFI] Mounted Filesystems Count: %d\n", FsNoHandles);
+#endif
   if (!EFI_ERROR(Status) && FsHandles != NULL) {
     for (UINTN FsIdx = 0; FsIdx < FsNoHandles; FsIdx++) {
       EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *Fs;
@@ -720,7 +736,9 @@ VOID EFIAPI PlatformBootManagerAfterConsole(VOID)
             EFI_FILE_MODE_READ, 0);
       }
       if (!EFI_ERROR(Status)) {
+#ifndef QUIET_PLATFORM_BOOT
         Print(L"[UEFI] Found Windows Bootloader on FS %d!\n", FsIdx);
+#endif
         File->Close(File);
         Root->Close(Root);
 

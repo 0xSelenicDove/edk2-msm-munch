@@ -10,8 +10,7 @@ DefinitionBlock("DSDT.AML", "DSDT", 0x02, "QCOMM ", "SDM850 ", 3)
 		// Include("cust_dsdt.asl") 
 
         // Primary controller through the Windows USB Role Switch framework.
-        // Direct xHCI host node (no dual-role switch): the Type-C/URS path needs a working PEP.
-        Include("usb_host_test.asl")
+        Include("usb_xhci.asl")
 
         // PM8150B Type-C/OTG control path used to negotiate host mode and
         // switch on VBUS for the physical connector.

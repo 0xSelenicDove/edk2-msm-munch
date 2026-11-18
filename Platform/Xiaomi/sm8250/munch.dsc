@@ -16,7 +16,7 @@
 !include Platform/Qualcomm/sm8250/sm8250.dsc
 
 [BuildOptions.common]
-  GCC:*_*_AARCH64_CC_FLAGS = -DENABLE_LINUX_SIMPLE_MASS_STORAGE -DMUNCH_BUTTONS
+  GCC:*_*_AARCH64_CC_FLAGS = -DENABLE_LINUX_SIMPLE_MASS_STORAGE -DMUNCH_BUTTONS -DMUNCH_QUIET_BOOT
 
 [PcdsFixedAtBuild.common]
   # Seconds to wait at the splash for Volume Up (Boot Manager menu).

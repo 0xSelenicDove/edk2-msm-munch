@@ -5,7 +5,6 @@ FILE FREEFORM = 7E374E25-8E01-4FEE-87F2-390C23C606CD {
   SECTION RAW = Silicon/Qualcomm/sm8250/AcpiTables/Facp.aml
   SECTION RAW = Silicon/Qualcomm/sm8250/AcpiTables/Gtdt.aml
   SECTION RAW = Silicon/Qualcomm/sm8250/AcpiTables/bgrt.aml
-  // IORT for USB disabled for the elimination test (see git history).
   SECTION UI = "AcpiTables"
 }
 
@@ -27,5 +26,5 @@ INF Platform/Xiaomi/sm8250/Drivers/MunchOtgDxe/MunchOtgDxe.inf
 // Volume/power key input read straight from the PM8150 (ButtonsDxe needs PmicDxe).
 INF Platform/Xiaomi/sm8250/Drivers/MunchButtonsDxe/MunchButtonsDxe.inf
 
-// Probe of the usb30_prim clock/power state (read-only for now).
+// USB host bring-up (clock, UTMI-as-PIPE, host mode) before the OS starts.
 INF Platform/Xiaomi/sm8250/Drivers/MunchUsbDxe/MunchUsbDxe.inf

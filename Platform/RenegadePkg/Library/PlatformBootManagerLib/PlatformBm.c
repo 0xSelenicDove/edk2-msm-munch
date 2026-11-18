@@ -719,7 +719,9 @@ VOID EFIAPI PlatformBootManagerAfterConsole(VOID)
   Status = gBS->LocateHandleBuffer(
       ByProtocol, &gEfiSimpleFileSystemProtocolGuid, NULL, &FsNoHandles,
       &FsHandles);
+#ifndef MUNCH_QUIET_BOOT
   Print(L"[UEFI] Mounted Filesystems Count: %d\n", FsNoHandles);
+#endif
   if (!EFI_ERROR(Status) && FsHandles != NULL) {
     for (UINTN FsIdx = 0; FsIdx < FsNoHandles; FsIdx++) {
       EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *Fs;
@@ -743,7 +745,9 @@ VOID EFIAPI PlatformBootManagerAfterConsole(VOID)
             EFI_FILE_MODE_READ, 0);
       }
       if (!EFI_ERROR(Status)) {
+#ifndef MUNCH_QUIET_BOOT
         Print(L"[UEFI] Found Windows Bootloader on FS %d!\n", FsIdx);
+#endif
         File->Close(File);
         Root->Close(Root);
 

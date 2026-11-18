@@ -323,15 +323,7 @@ MunchOtgReadyToBoot (
   gBS->CloseEvent (Event);
 
   Status = EnableMunchOtg ();
-  Print (L"\r\nMunch OTG: arb=%08x typec=%02x result=%r cfg=%02x cmd=%02x\r\n",
-         mDiagVersion, mDiagTypecStatus, Status, mDiagOtgConfig,
-         mDiagOtgCommand);
-  Print (L"APIDs: count=%u typec=%d/owner%u usb=%02x/%02x dcdc=%d/owner%u\r\n",
-         mDiagApidCount, mDiagTypecApid, mDiagTypecOwner,
-         mDiagUsbType, mDiagUsbSubtype,
-         mDiagDcdcApid, mDiagDcdcOwner);
-  // Keep the diagnostic readable but short; it runs before every boot entry.
-  MicroSecondDelay (300000);
+  Print (L"USB OTG power: %r\r\n", Status);
 }
 
 EFI_STATUS

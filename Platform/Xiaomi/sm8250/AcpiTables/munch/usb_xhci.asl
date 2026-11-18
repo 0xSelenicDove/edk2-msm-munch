@@ -1,18 +1,18 @@
-// Snapdragon 865/870 primary DWC3/xHCI controller in host-only mode.
+// Snapdragon 865/870 primary DWC3 controller (usb30_prim) as a standard ACPI xHCI.
 //
-// QcXhciFilter8250 binds directly to QCOM25A6.  The USB0 namespace path is
-// also named in IortUsb.aml, which maps controller DMA SID 0x140 through the
-// apps SMMU.
+// The firmware (MunchUsbDxe) has already turned the controller on and switched it to
+// host mode, so Windows' inbox usbxhci driver can drive it directly (ACPI\PNP0D10).
+// Qualcomm's QCOM25A6 filter driver hangs the system here (CLOCK_WATCHDOG_TIMEOUT),
+// and the URS/Type-C path needs a working PEP, which this platform does not have.
+//
+// Hardware: register window 0xA600000, xHCI interrupt GIC 165 (SPI 133).
 Device (USB0)
 {
-    // Standard ACPI xHCI: bound by the inbox usbxhci driver, not by Qualcomm's filter.
     Name (_HID, "PNP0D10")
     Name (_UID, Zero)
     Name (_CCA, Zero)
     Name (_S0W, 0x03)
 
-    // Elimination test: only the register window and the main xHCI interrupt.
-    // (The earlier node also listed pwr_event, DP/DM and SS wake interrupts.)
     Name (_CRS, ResourceTemplate ()
     {
         Memory32Fixed (ReadWrite, 0x0A600000, 0x00100000)

@@ -127,17 +127,17 @@ bcdedit /store BCD /set {default} bootstatuspolicy IgnoreAllFailures
 | **Boot menu + buttons** | 🟢 **Working** | Volume Up/Down + Power via `MunchButtonsDxe`; Android ⇄ Windows via A/B slots |
 | **Display (GOP framebuffer)** | 🟢 **Working** | 1080 × 2400 framebuffer at `0x9c000000` |
 | **UFS Storage** | 🟢 **Working** | `ufs.asl` |
-| **USB-C host (mouse/keyboard)** | 🟢 **Working** | Firmware brings the controller up in host mode; Windows uses the inbox xHCI driver (`PNP0D10`). USB 2.0 only |
+| **USB-C host (mouse/keyboard)** | 🟢 **Working** | Firmware brings the controller up in host mode; Windows uses the inbox xHCI driver (`PNP0D10`). The phone's port is USB 2.0 hardware |
 | **USB-C power (VBUS/OTG)** | 🟢 **Working** | `MunchOtgDxe` enables the PM8150B OTG boost |
-| **USB-C device mode / role switching / USB 3.0** | 🔴 **Not working** | Needs the Type-C manager and a real PEP (see below) |
+| **USB-C device mode / role switching** | 🔴 **Not working** | Needs the Type-C manager and a real PEP (see below) |
 | **Touchscreen** | 🔴 **Not working** | FocalTech on SPI (QUP SE4, reset GPIO33, IRQ GPIO39); needs bus/GPIO/PEP ACPI nodes |
 | **GPU / Wi-Fi / Bluetooth / Audio / Battery / Cellular** | ⚪ **Not started** | Need ACPI nodes and drivers that are not present yet |
 
 ### How USB host was made to work
 * The bootloader leaves the USB controller powered, with most clocks running, but in **device mode** and with `mock_utmi_clk` off. Qualcomm's own USB bring-up driver (`UsbConfigDxe`) never runs on this platform because it waits for a protocol nothing provides.
-* `MunchUsbDxe` (firmware) enables the UTMI clock, selects UTMI as the PIPE clock (no USB 3.0 PHY is running, same trick as Linux `dwc3_qcom_select_utmi_clk`), stops the device controller and switches the core to host mode. It prints one status line before boot.
+* `MunchUsbDxe` (firmware) enables the UTMI clock, selects UTMI as the PIPE clock (the port is USB 2.0 only, so the USB 3.0 PHY is not needed; same trick as Linux `dwc3_qcom_select_utmi_clk`), stops the device controller and switches the core to host mode. It prints one status line before boot.
 * The DSDT exposes `USB0` as a plain ACPI xHCI (`PNP0D10`). Qualcomm's `qcxhcifilter` driver (`QCOM25A6`) hangs Windows with `CLOCK_WATCHDOG_TIMEOUT`, so it is not used.
-* Windows' own USB-C stack is not used either: the Type-C port manager and URS role switch depend on Qualcomm's PEP (power engine), and the real `QCOM2519` PEP fails to start (`CM_PROB_FAILED_ADD`) without full SM8250 clock/power tables. USB therefore only works as a host, USB 2.0 speed.
+* Windows' own USB-C stack is not used either: the Type-C port manager and URS role switch depend on Qualcomm's PEP (power engine), and the real `QCOM2519` PEP fails to start (`CM_PROB_FAILED_ADD`) without full SM8250 clock/power tables. USB therefore only works as a host. (The phone has a USB 2.0 port, so nothing is lost on speed.)
 
 ### Why touch still doesn't work
 * The touchscreen is a FocalTech chip on SPI (QUP SE4, reset GPIO33, IRQ GPIO39). Windows needs the SPI bus, GPIO controller and PEP nodes for it; they have the same dependency on a working power controller.

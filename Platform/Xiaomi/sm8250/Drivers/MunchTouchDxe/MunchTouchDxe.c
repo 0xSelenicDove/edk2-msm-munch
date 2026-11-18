@@ -9,7 +9,10 @@
 
   This driver does everything needed for a proof of life and prints the result on the
   early console before the OS starts:
-    1. enable the QUP clocks (AHB master/slave and the SE4 core clock)
+    1. enable the QUP clocks (AHB master/slave and the SE4 core clock).  The s_ahb branch
+       has hardware clock gating, so its status bit reads "off" while idle; hwcg is switched
+       off to get a real status.  If that is not enough, an RPMh BCM vote (QUP0/CN0 through
+       the APPS RSC DRV2, addresses from the AOP command DB) is sent as a fallback.
     2. mux the SPI pins, drive reset low, power the two LDOs, release reset
     3. initialise the GENI serial engine in FIFO mode as an SPI master
     4. read register 0xA3 / 0x9F (chip ID, expected 0x56 0x52) with the FTS framing
@@ -40,6 +43,30 @@
 
 // bit6 m_ahb, bit7 s_ahb, bit8 core, bit9 core_2x, bit14 se4
 #define QUP_VOTE_BITS         (BIT6 | BIT7 | BIT8 | BIT9 | BIT14)
+
+// ---------------------------------------------------------------- RPMh (fallback only)
+// Command DB (read only) and the APPS RSC, DRV2 (HLOS).  Layout from Linux cmd-db.c / rpmh-rsc.c.
+#define CMD_DB_BASE           0x80860000U
+#define CMD_DB_SIZE           0x00020000U
+#define CMD_DB_DATA_OFFSET    0x90U              // after version, magic, 8 rsc headers, checksum, reserved
+#define CMD_DB_MAX_SLV        8U
+#define CMD_DB_ENTRY_SIZE     24U
+
+#define RSC_DRV2_BASE         0x18220000U
+#define RSC_TCS_OFFSET        0x0D00U            // qcom,tcs-offset
+#define RSC_DRV_ID_REG        0x00U
+#define RSC_DRV_CHILD_CFG     0x0CU
+#define RSC_DRV_ID_NUM        2U                 // qcom,drv-id
+#define RSC_TCS_STRIDE        672U
+#define RSC_FIRST_ACTIVE_TCS  0U                 // tcs-config: 2 ACTIVE TCS come first
+#define RSC_ACTIVE_TCS_COUNT  2U
+
+#define TCS_AMC_ENABLE        BIT16
+#define TCS_AMC_TRIGGER       BIT24
+#define CMD_MSGID_LEN         8U
+#define CMD_MSGID_RESP_REQ    BIT8
+#define CMD_MSGID_WRITE       BIT16
+#define CMD_STATUS_COMPL      BIT16
 
 // ---------------------------------------------------------------- pin controller
 #define TLMM_SOUTH            0x0F500000U
@@ -536,6 +563,252 @@ FtsReadReg (
 }
 
 //
+// ---------------------------------------------------------------------------- RPMh
+//
+
+typedef struct {
+  UINT32  IrqEnable, IrqStatus, IrqClear;     // relative to the TCS base
+  UINT32  CmdStride;
+  UINT32  Control, CmdEnable, MsgId, Addr, Data, CmdStatus;   // relative to a TCS
+} RSC_REGS;
+
+STATIC CONST RSC_REGS  mRegs27 = {0x00, 0x04, 0x08, 20, 0x14, 0x1C, 0x30, 0x34, 0x38, 0x3C};
+STATIC CONST RSC_REGS  mRegs30 = {0x00, 0x04, 0x08, 24, 0x24, 0x2C, 0x34, 0x38, 0x3C, 0x40};
+
+STATIC CONST RSC_REGS  *mR;
+
+STATIC
+BOOLEAN
+NameEq (
+  IN CONST UINT8  *Id,
+  IN CONST CHAR8  *Name
+  )
+{
+  UINTN I;
+
+  for (I = 0; I < 8; I++) {
+    UINT8 C = (UINT8)Name[I];
+    if (Id[I] != C) {
+      return FALSE;
+    }
+    if (C == 0) {
+      return TRUE;
+    }
+  }
+  return TRUE;
+}
+
+/**
+  Find a resource in the AOP command DB.  Returns its address (0 if missing) and, if asked,
+  the first auxiliary data word (the BCM bandwidth unit).
+**/
+STATIC
+UINT32
+CmdDbFind (
+  IN  CONST CHAR8  *Name,
+  OUT UINT32       *Aux
+  )
+{
+  UINT32 I;
+  UINT32 J;
+
+  if (Aux != NULL) {
+    *Aux = 0;
+  }
+  if (MmioRead32 (CMD_DB_BASE + 4) != 0x0C0330DBU) {         // magic db 30 03 0c
+    return 0;
+  }
+
+  for (I = 0; I < CMD_DB_MAX_SLV; I++) {
+    UINT32 Hdr0  = MmioRead32 (CMD_DB_BASE + 8 + I * 16);    // slv_id | header_offset << 16
+    UINT32 Hdr1  = MmioRead32 (CMD_DB_BASE + 8 + I * 16 + 4);// data_offset | cnt << 16
+    UINT32 Ents;
+    UINT32 DataO;
+    UINT32 Cnt;
+
+    if ((Hdr0 & 0xFFFFU) == 0) {
+      break;
+    }
+    Ents  = CMD_DB_DATA_OFFSET + (Hdr0 >> 16);
+    DataO = CMD_DB_DATA_OFFSET + (Hdr1 & 0xFFFFU);
+    Cnt   = Hdr1 >> 16;
+    if ((Cnt > 512) || (Ents + Cnt * CMD_DB_ENTRY_SIZE > CMD_DB_SIZE)) {
+      continue;
+    }
+    for (J = 0; J < Cnt; J++) {
+      UINT32 E = CMD_DB_BASE + Ents + J * CMD_DB_ENTRY_SIZE;
+      UINT32 Id[2];
+      Id[0] = MmioRead32 (E);
+      Id[1] = MmioRead32 (E + 4);
+      if (NameEq ((UINT8 *)Id, Name)) {
+        UINT32 Len = MmioRead32 (E + 20) & 0xFFFFU;
+        UINT32 Off = MmioRead32 (E + 20) >> 16;
+        if ((Aux != NULL) && (Len >= 4) && (DataO + Off + 4 <= CMD_DB_SIZE)) {
+          *Aux = MmioRead32 (CMD_DB_BASE + DataO + Off);
+        }
+        return MmioRead32 (E + 16);
+      }
+    }
+  }
+  return 0;
+}
+
+STATIC
+VOID
+TcsWrite (
+  IN UINT32  Tcs,
+  IN UINT32  Reg,
+  IN UINT32  Val
+  )
+{
+  MmioWrite32 (RSC_DRV2_BASE + RSC_TCS_OFFSET + RSC_TCS_STRIDE * Tcs + Reg, Val);
+}
+
+STATIC
+UINT32
+TcsRead (
+  IN UINT32  Tcs,
+  IN UINT32  Reg
+  )
+{
+  return MmioRead32 (RSC_DRV2_BASE + RSC_TCS_OFFSET + RSC_TCS_STRIDE * Tcs + Reg);
+}
+
+STATIC
+VOID
+TcsWriteSync (
+  IN UINT32  Tcs,
+  IN UINT32  Reg,
+  IN UINT32  Val
+  )
+{
+  UINT32 I;
+
+  TcsWrite (Tcs, Reg, Val);
+  for (I = 0; I < 1000; I++) {
+    if (TcsRead (Tcs, Reg) == Val) {
+      return;
+    }
+    MicroSecondDelay (1);
+  }
+}
+
+STATIC UINT32  mTcs = 0xFFFFFFFFU;
+
+/**
+  Read-only look at the RSC and pick a free active TCS.  This is the first access to the RSC.
+**/
+STATIC
+BOOLEAN
+RscInit (
+  VOID
+  )
+{
+  UINT32  Id;
+  UINT32  Cfg;
+  UINT32  Major;
+  UINT32  I;
+
+  Id    = MmioRead32 (RSC_DRV2_BASE + RSC_DRV_ID_REG);
+  Major = (Id >> 16) & 0xFFU;
+  Print (L"  RSC drv2 id %08x\r\n", Id);
+  if ((Major == 0) || (Major > 3)) {
+    Print (L"  RSC id unexpected, not touching it\r\n");
+    return FALSE;
+  }
+  mR  = (Major >= 3) ? &mRegs30 : &mRegs27;
+  Cfg = MmioRead32 (RSC_DRV2_BASE + RSC_DRV_CHILD_CFG);
+  Print (L"  RSC child cfg %08x (tcs for drv2: %u)\r\n", Cfg, (Cfg >> (6 * RSC_DRV_ID_NUM)) & 0x3FU);
+
+  for (I = RSC_FIRST_ACTIVE_TCS; I < RSC_FIRST_ACTIVE_TCS + RSC_ACTIVE_TCS_COUNT; I++) {
+    UINT32 En   = TcsRead (I, mR->CmdEnable);
+    UINT32 Ctl  = TcsRead (I, mR->Control);
+    Print (L"  tcs%u: cmd_enable %08x control %08x\r\n", I, En, Ctl);
+    if ((mTcs == 0xFFFFFFFFU) && (En == 0) && ((Ctl & (TCS_AMC_ENABLE | TCS_AMC_TRIGGER)) == 0)) {
+      mTcs = I;
+    }
+  }
+  if (mTcs == 0xFFFFFFFFU) {
+    Print (L"  no free active TCS\r\n");
+    return FALSE;
+  }
+  MmioWrite32 (RSC_DRV2_BASE + RSC_TCS_OFFSET + mR->IrqClear, BIT0 << mTcs);
+  return TRUE;
+}
+
+/**
+  Send one active-set BCM vote (commit + valid) through the chosen TCS and wait for the AOP
+  to answer.  Same sequence as Linux rpmh_rsc_send_data() / tcs_tx_done().
+**/
+STATIC
+EFI_STATUS
+RpmhSend (
+  IN UINT32  Addr,
+  IN UINT32  Data
+  )
+{
+  UINT32      I;
+  UINT32      Ctl;
+  EFI_STATUS  Status;
+  UINT32      Bit;
+
+  Bit = BIT0 << mTcs;
+
+  TcsWriteSync (mTcs, mR->CmdEnable, 0);
+  TcsWrite (mTcs, mR->MsgId, CMD_MSGID_LEN | CMD_MSGID_RESP_REQ | CMD_MSGID_WRITE);
+  TcsWrite (mTcs, mR->Addr, Addr);
+  TcsWrite (mTcs, mR->Data, Data);
+  TcsWrite (mTcs, mR->CmdEnable, BIT0);
+
+  // __tcs_set_trigger(true)
+  Ctl = TcsRead (mTcs, mR->Control) & ~TCS_AMC_TRIGGER;
+  TcsWriteSync (mTcs, mR->Control, Ctl);
+  Ctl &= ~TCS_AMC_ENABLE;
+  TcsWriteSync (mTcs, mR->Control, Ctl);
+  TcsWriteSync (mTcs, mR->Control, TCS_AMC_ENABLE);
+  TcsWrite (mTcs, mR->Control, TCS_AMC_ENABLE | TCS_AMC_TRIGGER);
+
+  Status = EFI_TIMEOUT;
+  for (I = 0; I < 100000; I++) {                              // up to 100 ms
+    if ((MmioRead32 (RSC_DRV2_BASE + RSC_TCS_OFFSET + mR->IrqStatus) & Bit) != 0) {
+      Status = EFI_SUCCESS;
+      break;
+    }
+    MicroSecondDelay (1);
+  }
+
+  Print (L"    rpmh %05x <- %08x: %r (cmd status %08x)\r\n", Addr, Data, Status,
+         TcsRead (mTcs, mR->CmdStatus));
+
+  // __tcs_set_trigger(false), reclaim
+  Ctl = TcsRead (mTcs, mR->Control) & ~TCS_AMC_TRIGGER;
+  TcsWriteSync (mTcs, mR->Control, Ctl);
+  Ctl &= ~TCS_AMC_ENABLE;
+  TcsWriteSync (mTcs, mR->Control, Ctl);
+  TcsWrite (mTcs, mR->CmdEnable, 0);
+  MmioWrite32 (RSC_DRV2_BASE + RSC_TCS_OFFSET + mR->IrqClear, Bit);
+  return Status;
+}
+
+STATIC
+EFI_STATUS
+BcmVote (
+  IN CONST CHAR8  *Name,
+  IN UINT32       Vote
+  )
+{
+  UINT32  Aux;
+  UINT32  Addr;
+
+  Addr = CmdDbFind (Name, &Aux);
+  if (Addr == 0) {
+    Print (L"    BCM %a not in cmd-db\r\n", Name);
+    return EFI_NOT_FOUND;
+  }
+  return RpmhSend (Addr, BIT30 | BIT29 | ((Vote & 0x3FFFU) << 14) | (Vote & 0x3FFFU));
+}
+
+//
 // ---------------------------------------------------------------------------- main
 //
 
@@ -555,39 +828,82 @@ QupClocksOn (
 
 STATIC
 BOOLEAN
+WaitQupClocks (
+  OUT UINT32  *M,
+  OUT UINT32  *S,
+  OUT UINT32  *C,
+  IN  UINT32  Ms
+  )
+{
+  UINT32  Retry;
+
+  for (Retry = 0; Retry < Ms * 100; Retry++) {
+    if (QupClocksOn (M, S, C)) {
+      return TRUE;
+    }
+    MicroSecondDelay (10);
+  }
+  return QupClocksOn (M, S, C);
+}
+
+STATIC
+BOOLEAN
 EnableQupClocks (
   VOID
   )
 {
-  UINT32  Retry;
   UINT32  M;
   UINT32  S;
   UINT32  C;
+  UINT32  Level;
+  UINT32  Vote;
+  UINT32  Aux1;
+  UINT32  Aux2;
 
   MmioWrite32 (GCC_BASE + GCC_QUP_VOTE_REG,
                MmioRead32 (GCC_BASE + GCC_QUP_VOTE_REG) | QUP_VOTE_BITS);
 
-  for (Retry = 0; Retry < 5000; Retry++) {      // up to 50 ms
-    if (QupClocksOn (&M, &S, &C)) {
-      goto On;
-    }
-    MicroSecondDelay (10);
+  if (WaitQupClocks (&M, &S, &C, 20)) {
+    goto On;
   }
-
-  Print (L"  vote only: s_ahb still off (vote %08x m %08x s %08x se4 %08x core %08x 2x %08x)\r\n",
+  Print (L"  after vote: vote %08x m %08x s %08x se4 %08x core %08x 2x %08x\r\n",
          MmioRead32 (GCC_BASE + GCC_QUP_VOTE_REG), M, S, C,
          MmioRead32 (GCC_BASE + GCC_WRAP0_CORE_HALT),
          MmioRead32 (GCC_BASE + GCC_WRAP0_CORE2X_HALT));
 
-  // Fallback: enable the s_ahb branch directly through its own control register.
-  MmioOr32 (GCC_BASE + GCC_WRAP0_S_AHB_HALT, BIT0);
-  for (Retry = 0; Retry < 5000; Retry++) {
-    if (QupClocksOn (&M, &S, &C)) {
+  // Stage 1: the s_ahb branch has hardware clock gating (bit 1).  With it on, the status bit
+  // reads "off" whenever the branch is idle (Linux skips the halt check in that mode).  Turn
+  // the gating off so the branch really stays running and the status becomes meaningful.
+  if (((M | C) & BIT31) == 0 && ((S & BIT31) != 0) && ((S & BIT1) != 0)) {
+    Print (L"  s_ahb is hw-gated (%08x): disabling hwcg\r\n", S);
+    MmioAnd32 (GCC_BASE + GCC_WRAP0_S_AHB_HALT, ~(UINT32)BIT1);
+    if (WaitQupClocks (&M, &S, &C, 5)) {
       goto On;
     }
-    MicroSecondDelay (10);
+    Print (L"  hwcg off, s_ahb still %08x\r\n", S);
   }
 
+  // Stage 2: RPMh bus vote (QUP core / config NoC BCMs), as the downstream kernel does.
+  Aux1 = Aux2 = 0;
+  Print (L"  cmd-db: QUP0 @%05x CN0 @%05x (hdr %08x %08x)\r\n",
+         CmdDbFind ("QUP0", &Aux1), CmdDbFind ("CN0", &Aux2),
+         MmioRead32 (CMD_DB_BASE), MmioRead32 (CMD_DB_BASE + 4));
+  Print (L"  bcm unit QUP0 %08x CN0 %08x\r\n", Aux1, Aux2);
+
+  if (!RscInit ()) {
+    goto Fail;
+  }
+  for (Level = 0; Level < 3; Level++) {
+    Vote = (Level == 0) ? 1 : ((Level == 1) ? 0x40 : 0x800);
+    BcmVote ("QUP0", Vote);
+    BcmVote ("CN0", Vote);
+    if (WaitQupClocks (&M, &S, &C, 5)) {
+      goto On;
+    }
+    Print (L"  vote %x: s_ahb %08x\r\n", Vote, S);
+  }
+
+Fail:
   Print (L"  QUP clocks did NOT start (m %08x s %08x se4 %08x)\r\n", M, S, C);
   return FALSE;
 

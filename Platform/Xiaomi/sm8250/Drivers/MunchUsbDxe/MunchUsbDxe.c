@@ -30,6 +30,7 @@
 #include <Library/UefiLib.h>
 
 #define GCC_BASE                       0x00100000U
+#define GCC_USB30_PRIM_BCR             0x0F000U
 #define GCC_USB30_PRIM_GDSCR           0x0F004U
 #define GCC_USB30_PRIM_MOCK_UTMI_CBCR  0x0F01CU
 
@@ -68,6 +69,14 @@ WaitClockOn (
   return FALSE;
 }
 
+// State of the controller as found (diagnostic, printed once).
+STATIC UINT32 mPreGctl;
+STATIC UINT32 mPreCmd;
+STATIC UINT32 mPreSts;
+STATIC UINT32 mPrePort;
+STATIC UINT32 mPostPort;
+STATIC BOOLEAN mWasReset;
+
 STATIC
 EFI_STATUS
 EnableUsbHost (
@@ -76,11 +85,28 @@ EnableUsbHost (
 {
   UINT32 Value;
   UINT32 Retry;
+  UINT32 Ops;
 
   // The power domain must already be on (the bootloader leaves it on); never touch
   // the controller otherwise, an access to a powered-off block hangs the system.
   if ((MmioRead32 (GCC_BASE + GCC_USB30_PRIM_GDSCR) & BIT31) == 0) {
     return EFI_NOT_READY;
+  }
+
+  // 0. After a restart the controller still holds the previous OS's host-mode state
+  //    (a fresh boot from the bootloader finds it in device mode instead).  Reset the
+  //    whole block so the OS driver starts from a clean controller.
+  mPreGctl = MmioRead32 (USB_BASE + DWC3_GCTL);
+  if ((MmioRead32 (USB_BASE + DWC3_GSTS) & 3) == 1) {
+    Ops       = USB_BASE + (MmioRead32 (USB_BASE) & 0xFFU);
+    mPreCmd   = MmioRead32 (Ops + 0x00);
+    mPreSts   = MmioRead32 (Ops + 0x04);
+    mPrePort  = MmioRead32 (Ops + 0x400);
+    mWasReset = TRUE;
+    MmioOr32 (GCC_BASE + GCC_USB30_PRIM_BCR, BIT0);
+    MicroSecondDelay (200);
+    MmioAnd32 (GCC_BASE + GCC_USB30_PRIM_BCR, ~(UINT32)BIT0);
+    MicroSecondDelay (2000);
   }
 
   // 1. UTMI clock.
@@ -119,6 +145,7 @@ EnableUsbHost (
 
   // xHCI CAPLENGTH (low byte) / HCIVERSION (high half): only valid in host mode.
   *XhciCaps = MmioRead32 (USB_BASE + 0x00);
+  mPostPort = MmioRead32 (USB_BASE + (*XhciCaps & 0xFFU) + 0x400);
   return ((*XhciCaps >> 16) >= 0x0100) ? EFI_SUCCESS : EFI_DEVICE_ERROR;
 }
 
@@ -142,6 +169,10 @@ MunchUsbReadyToBoot (
     Print (L" (xHCI %x.%02x)", (Caps >> 24) & 0xFF, (Caps >> 16) & 0xFF);
   }
   Print (L"\r\n");
+  if (mWasReset) {
+    Print (L"USB reset: gctl %08x cmd %08x sts %08x port %08x -> port %08x\r\n",
+           mPreGctl, mPreCmd, mPreSts, mPrePort, mPostPort);
+  }
 }
 
 EFI_STATUS

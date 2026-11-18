@@ -60,7 +60,6 @@ jobs:
         run: |
           mkdir -p artifacts
           cp -v Build/munch/RELEASE_CLANG38/FV/SM8250_UEFI.fd artifacts/SM8250_UEFI.fd 2>/dev/null || true
-          cp -v boot-*.img artifacts/ 2>/dev/null || true
           cp -v uefi-installer-*.zip artifacts/ 2>/dev/null || true
           ls -lh artifacts/
 

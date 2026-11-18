@@ -84,7 +84,10 @@ SwitchSlotsAppEntryPoint(
 
   // Print (L"Current active slot has been updated successfully! Press any key
   // to reboot.\n"); WaitAnyKey(SystemTable);
-  gRT->ResetSystem(EfiResetWarm, EFI_SUCCESS, 0, NULL);
+  // A warm reset hangs on munch (the slot is already switched by this point).
+  // A cold reset reboots cleanly into the other slot.
+  Print(L"Slot switched. Rebooting...\n");
+  gRT->ResetSystem(EfiResetCold, EFI_SUCCESS, 0, NULL);
   CpuDeadLoop();
   return EFI_SUCCESS;
 }

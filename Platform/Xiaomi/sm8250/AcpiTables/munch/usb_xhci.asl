@@ -11,7 +11,10 @@ Device (USB0)
     Name (_HID, "PNP0D10")
     Name (_UID, Zero)
     Name (_CCA, Zero)
-    Name (_S0W, 0x03)
+    // D0 only: the controller must never be put to sleep while the system is running.
+    // The wake interrupts a sleeping xHCI needs to notice a new device (HS-PHY DP/DM
+    // wake, pwr_event) are not wired, so a suspended controller would miss attaches.
+    Name (_S0W, Zero)
 
     Name (_CRS, ResourceTemplate ()
     {

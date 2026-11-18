@@ -5,7 +5,8 @@
 // apps SMMU.
 Device (USB0)
 {
-    Name (_HID, "QCOM25A6")
+    // Standard ACPI xHCI: bound by the inbox usbxhci driver, not by Qualcomm's filter.
+    Name (_HID, "PNP0D10")
     Name (_UID, Zero)
     Name (_CCA, Zero)
     Name (_S0W, 0x03)

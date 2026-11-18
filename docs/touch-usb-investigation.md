@@ -96,3 +96,13 @@ First builds had a flaky mouse: sometimes not detected after boot, needing replu
 
 ## Shutdown BSOD (open)
 Shutting down Windows ends in `INTERNAL_POWER_ERROR` (0xA0). One earlier log entry had parameters `0xBEEF, 0x8003, 0xC4000001` (PSCI CPU_SUSPEND), `0xFFFFFFFE` (INVALID_PARAMETERS), but disabling idle states C3, then C3+C4 (WFI-only) did not remove the BSOD, so the cause is not simply those idle states. `DisplayParameters = 1` is set in the registry; the four numbers appear at the top-left of the blue screen. The file system stays clean afterwards (the BSOD happens at the final power-off).
+
+## Touch firmware bring-up (branch `feat/munch-touch`, not merged)
+
+Findings from running `MunchTouchDxe` on the device (2026-11-18):
+
+* The touch SPI bus is QUP wrapper 0 serial engine 4 (`0x990000`) on **GPIO 8-11** (function 1), reset GPIO 33, IRQ GPIO 39. (GPIO 119-122, used by the first probe, belong to SE3.) Supplies are `pm8150a_l1` (1.8 V) and `pm8150a_l10` (3.2 V), i.e. PM8150L (SPMI SID 4) LDO1/LDO10, normally switched by RPMh.
+* The bootloader leaves everything unconfigured. Voting the clocks through `GCC_APCS_CLOCK_BRANCH_ENA_VOTE` (`0x52008`) starts `m_ahb`, `core`, `core_2x` and the SE4 clock, but `gcc_qupv3_wrap_0_s_ahb_clk` (status `0x17008` = `0x80000002`) stays off, even with its own enable bit written directly. The SE4 registers cannot be accessed safely without it, so the firmware stops there.
+* Probable cause: that branch waits on a bus/NoC power request that only Qualcomm's RPMh/PEP code makes, the same dependency that blocks Windows' real PEP. Getting further needs an RPMh (RSC) client in firmware, or a working PEP.
+* The firmware side is written (pins, rails over SPMI, GENI SPI init, FTS framing with CRC, chip ID read of registers `0xA3`/`0x9F`, expected `56 52`) but untested past the clock step.
+* Windows would still need a FocalTech SPI touch driver (the image has none).

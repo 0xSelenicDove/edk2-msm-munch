@@ -92,6 +92,25 @@ typedef struct {
 } PLATFORM_USB_KEYBOARD;
 #pragma pack()
 
+#ifdef MUNCH_BUTTONS
+//
+// Volume/power keys from MunchButtonsDxe.  Keep the GUID in sync with
+// Platform/Xiaomi/sm8250/Drivers/MunchButtonsDxe/MunchButtonsDxe.c.
+//
+#pragma pack(1)
+typedef struct {
+  VENDOR_DEVICE_PATH       Vendor;
+  EFI_DEVICE_PATH_PROTOCOL End;
+} PLATFORM_MUNCH_KEYPAD;
+#pragma pack()
+
+STATIC PLATFORM_MUNCH_KEYPAD mMunchKeypad = {
+    {{HARDWARE_DEVICE_PATH, HW_VENDOR_DP, DP_NODE_LEN(VENDOR_DEVICE_PATH)},
+     {0x3f6b1c92, 0x5a07, 0x4e4d, {0x9b, 0x21, 0x6c, 0x0d, 0x41, 0xa8, 0x7e, 0x15}}},
+    {END_DEVICE_PATH_TYPE, END_ENTIRE_DEVICE_PATH_SUBTYPE,
+     DP_NODE_LEN(EFI_DEVICE_PATH_PROTOCOL)}};
+#endif
+
 STATIC PLATFORM_USB_KEYBOARD mUsbKeyboard = {
     //
     // USB_CLASS_DEVICE_PATH Keyboard
@@ -515,6 +534,10 @@ VOID EFIAPI PlatformBootManagerBeforeConsole(VOID)
   //
   EfiBootManagerUpdateConsoleVariable(
       ConIn, (EFI_DEVICE_PATH_PROTOCOL *)&mUsbKeyboard, NULL);
+#ifdef MUNCH_BUTTONS
+  EfiBootManagerUpdateConsoleVariable(
+      ConIn, (EFI_DEVICE_PATH_PROTOCOL *)&mMunchKeypad, NULL);
+#endif
 
   EFI_STATUS                Status;
   EFI_HANDLE *              handles;

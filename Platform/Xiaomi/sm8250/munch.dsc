@@ -10,14 +10,18 @@
   SKUID_IDENTIFIER               = DEFAULT
   FLASH_DEFINITION               = Platform/Qualcomm/sm8250/sm8250.fdf
   DEVICE_DXE_FV_COMPONENTS       = Platform/Xiaomi/sm8250/munch.fdf.inc
+  DEFINE AB_SLOTS_SUPPORT        = TRUE
   DEVICE_DXE_APRIORI_COMPONENTS  = Platform/Xiaomi/sm8250/munch-apriori.fdf.inc
 
 !include Platform/Qualcomm/sm8250/sm8250.dsc
 
 [BuildOptions.common]
-  GCC:*_*_AARCH64_CC_FLAGS = -DENABLE_SIMPLE_INIT -DENABLE_LINUX_SIMPLE_MASS_STORAGE
+  GCC:*_*_AARCH64_CC_FLAGS = -DENABLE_LINUX_SIMPLE_MASS_STORAGE -DMUNCH_BUTTONS
 
 [PcdsFixedAtBuild.common]
+  # Seconds to wait at the splash for Volume Up (Boot Manager menu).
+  gEfiMdePkgTokenSpaceGuid.PcdPlatformBootTimeOut|5
+
   gQcomTokenSpaceGuid.PcdMipiFrameBufferAddress|0x9c000000
   gQcomTokenSpaceGuid.PcdMipiFrameBufferWidth|1080
   gQcomTokenSpaceGuid.PcdMipiFrameBufferHeight|2400
@@ -33,3 +37,4 @@
 [Components.common]
   Platform/Xiaomi/sm8250/Drivers/MunchPmicVersionDxe/MunchPmicVersionDxe.inf
   Platform/Xiaomi/sm8250/Drivers/MunchOtgDxe/MunchOtgDxe.inf
+  Platform/Xiaomi/sm8250/Drivers/MunchButtonsDxe/MunchButtonsDxe.inf

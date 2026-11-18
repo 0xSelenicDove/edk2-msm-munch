@@ -1,12 +1,21 @@
 /** @file
-  Touchscreen bring-up for Xiaomi munch (SM8250), step 1: PROBE ONLY (read-only).
+  Touchscreen bring-up for Xiaomi munch (SM8250), step 2: read the touch chip ID.
 
-  The touch chip is a FocalTech on SPI (QUP wrapper 0, serial engine 4 at 0x990000,
-  pins GPIO 119-122), reset GPIO 33, interrupt GPIO 39.  This probe prints what the
-  bootloader left behind (clocks, pin configuration) so we know what must be set up.
+  The touch chip is a FocalTech FTS (FT3658 class) on SPI.  From the device tree:
+    * SPI bus  : QUP wrapper 0, serial engine 4 (0x990000), pins GPIO 8..11 (function 1)
+    * reset    : GPIO 33 (active low), interrupt: GPIO 39
+    * supplies : pm8150l LDO1 (1.8 V I/O) and LDO10 (3.2 V core)
+    * SPI mode 0, 8 bit, up to 6 MHz
 
-  Only the clock controller and pin controller are read.  The SPI engine registers
-  are read only if all of its clocks are already running.
+  This driver does everything needed for a proof of life and prints the result on the
+  early console before the OS starts:
+    1. enable the QUP clocks (AHB master/slave and the SE4 core clock)
+    2. mux the SPI pins, drive reset low, power the two LDOs, release reset
+    3. initialise the GENI serial engine in FIFO mode as an SPI master
+    4. read register 0xA3 / 0x9F (chip ID, expected 0x56 0x52) with the FTS framing
+
+  Nothing is written to any other peripheral.  If a step fails, the driver prints why
+  and returns without touching the next hardware block.
 **/
 
 #include <Uefi.h>
@@ -17,6 +26,7 @@
 #include <Library/UefiBootServicesTableLib.h>
 #include <Library/UefiLib.h>
 
+// ---------------------------------------------------------------- clocks (GCC)
 #define GCC_BASE              0x00100000U
 #define GCC_QUP_VOTE_REG      0x52008U       // bit6 wrap0 M-AHB, bit7 S-AHB, bit14 SE4 clock
 #define GCC_WRAP0_M_AHB_HALT  0x17004U
@@ -24,31 +34,534 @@
 #define GCC_WRAP0_S4_HALT     0x174CCU
 #define GCC_WRAP0_S4_RCG      0x174D0U
 
-// TLMM tiles (sm8250.dtsi): west 0xF100000, south 0xF500000, north 0xF900000.
-#define TLMM_WEST             0x0F100000U
+#define QUP_VOTE_BITS         (BIT6 | BIT7 | BIT14)
+
+// ---------------------------------------------------------------- pin controller
 #define TLMM_SOUTH            0x0F500000U
 #define TLMM_NORTH            0x0F900000U
 #define TLMM_PIN_STRIDE       0x1000U
 
+#define TS_RESET_GPIO         33U            // south tile
+#define TS_IRQ_GPIO           39U            // south tile
+#define SPI_GPIO_FIRST        8U             // north tile, gpio 8..11 = SE4 MISO/MOSI/CLK/CS
+
+// ctl register: pull [1:0] (0 none, 1 down, 3 up), function [5:2], drive [8:6] (2 mA * (n+1)), oe bit 9.
+// io register : bit0 input value, bit1 output value.
+#define PIN_CTL(Func, Pull, Drive, Oe) \
+  ((UINT32)(Pull) | ((UINT32)(Func) << 2) | ((UINT32)(Drive) << 6) | ((UINT32)(Oe) << 9))
+
+// ---------------------------------------------------------------- PMIC arbiter (SPMI)
+#define PMIC_ARB_CORE_BASE        0x0C440000U
+#define PMIC_ARB_CHNLS_BASE       0x0C600000U
+#define PMIC_ARB_OBSERVER_BASE    0x0E600000U
+#define PMIC_ARB_CONFIG_BASE      0x0C40A000U
+#define PMIC_ARB_FEATURES         0x0004U
+#define PMIC_ARB_APID_MAP_BASE    0x0900U
+#define PMIC_ARB_APID_OWNER_BASE  0x0700U
+#define PMIC_ARB_MAX_APIDS        512U
+#define PMIC_ARB_CMD              0x00U
+#define PMIC_ARB_STATUS           0x08U
+#define PMIC_ARB_WDATA0           0x10U
+#define PMIC_ARB_RDATA0           0x18U
+#define PMIC_ARB_OP_EXT_WRITEL    0U
+#define PMIC_ARB_OP_EXT_READL     1U
+#define PMIC_ARB_STATUS_DONE      BIT0
+#define PMIC_ARB_STATUS_ERROR     (BIT1 | BIT2 | BIT3)
+
+#define PM8150L_SID               4U         // "pm8150a_*" supplies in the device tree
+#define LDO1_BASE                 0x4000U    // pm8150a_l1  (vcc_i2c, 1.8 V)
+#define LDO10_BASE                0x4900U    // pm8150a_l10 (vdd, 3.2 V)
+#define LDO_REG_TYPE              0x04U
+#define LDO_REG_SUBTYPE           0x05U
+#define LDO_REG_STATUS1           0x08U
+#define LDO_REG_VSET_LB           0x40U
+#define LDO_REG_VSET_UB           0x41U
+#define LDO_REG_ENABLE            0x46U
+#define LDO_TYPE                  0x10U
+#define LDO_ENABLE_BIT            BIT7
+
+// ---------------------------------------------------------------- GENI serial engine
 #define SE4_BASE              0x00990000U
+
+#define GENI_FORCE_DEFAULT    0x020U
+#define GENI_OUTPUT_CTRL      0x024U
+#define GENI_CGC_CTRL         0x028U
+#define GENI_STATUS           0x040U
+#define GENI_SER_M_CLK_CFG    0x048U
+#define GENI_IF_DISABLE_RO    0x064U
+#define GENI_FW_REVISION_RO   0x068U
+#define GENI_MULTILOCK_MSA_RO 0x074U
+#define GENI_CLK_SEL          0x07CU
+#define GENI_DMA_MODE_EN      0x258U
+#define GENI_BYTE_GRAN        0x254U
+#define GENI_TX_PACKING_CFG0  0x260U
+#define GENI_TX_PACKING_CFG1  0x264U
+#define GENI_RX_PACKING_CFG0  0x284U
+#define GENI_RX_PACKING_CFG1  0x288U
+#define SPI_CPHA              0x224U
+#define SPI_LOOPBACK          0x22CU
+#define SPI_CPOL              0x230U
+#define SPI_DEMUX_OUTPUT_INV  0x24CU
+#define SPI_DEMUX_SEL         0x250U
+#define SPI_TRANS_CFG         0x25CU
+#define SPI_WORD_LEN          0x268U
+#define SPI_TX_TRANS_LEN      0x26CU
+#define SPI_RX_TRANS_LEN      0x270U
+#define GENI_M_CMD0           0x600U
+#define GENI_M_CMD_CTRL       0x604U
+#define GENI_M_IRQ_STATUS     0x610U
+#define GENI_M_IRQ_EN         0x614U
+#define GENI_M_IRQ_CLEAR      0x618U
+#define GENI_S_IRQ_CLEAR      0x648U
+#define GENI_TX_FIFO          0x700U
+#define GENI_RX_FIFO          0x780U
+#define GENI_RX_FIFO_STATUS   0x804U
+#define GENI_TX_WATERMARK     0x80CU
+#define GENI_RX_WATERMARK     0x810U
+#define GENI_RX_RFR_WATERMARK 0x814U
+#define GENI_IOS              0x908U
+#define DMA_TX_IRQ_CLR        0xC44U
+#define DMA_RX_IRQ_CLR        0xD44U
+#define GENI_SE_IRQ_EN        0xE1CU
+#define GENI_HW_PARAM_0       0xE24U
+#define DMA_GENERAL_CFG       0xE30U
+
+#define M_CMD_DONE            BIT0
+#define SPI_TX_RX_OPCODE      7U
+#define SPI_PROTOCOL          1U
+
+#define SPI_DIV               4U             // 19.2 MHz / 4 = 4.8 MHz (device tree allows 6 MHz)
+
+#define SE_READ(Off)          MmioRead32 (SE4_BASE + (Off))
+#define SE_WRITE(Off, Val)    MmioWrite32 (SE4_BASE + (Off), (Val))
+
+// ---------------------------------------------------------------- FTS protocol
+#define FTS_REG_CHIP_ID       0xA3U          // expected 0x56
+#define FTS_REG_CHIP_ID2      0x9FU          // expected 0x52
+#define FTS_READ_CMD          0xA0U          // 0x80 read | 0x20 CRC enabled
+#define FTS_DUMMY             3U
+#define FTS_HEADER            4U
+#define FTS_XFER_LEN          (FTS_HEADER + FTS_DUMMY + 1 + 2)   // = 10 bytes for a 1-byte read
+
+//
+// ---------------------------------------------------------------------------- SPMI
+//
+
+STATIC
+INT32
+FindApid (
+  IN UINT16   Ppid,
+  IN BOOLEAN  RequireWriteOwner
+  )
+{
+  UINT32 Count;
+  UINT32 Index;
+  INT32  FirstMatch;
+
+  Count = MmioRead32 (PMIC_ARB_CORE_BASE + PMIC_ARB_FEATURES) & 0x7FFU;
+  if ((Count == 0) || (Count > PMIC_ARB_MAX_APIDS)) {
+    Count = PMIC_ARB_MAX_APIDS;
+  }
+
+  FirstMatch = -1;
+  for (Index = 0; Index < Count; Index++) {
+    UINT32 Map;
+    UINT32 Owner;
+
+    Map = MmioRead32 (PMIC_ARB_CORE_BASE + PMIC_ARB_APID_MAP_BASE + (Index * sizeof (UINT32)));
+    if ((((Map >> 8) & 0xFFFU) != Ppid) || (Map == 0)) {
+      continue;
+    }
+    if (FirstMatch < 0) {
+      FirstMatch = (INT32)Index;
+    }
+    Owner = MmioRead32 (PMIC_ARB_CONFIG_BASE + PMIC_ARB_APID_OWNER_BASE +
+                        (Index * sizeof (UINT32))) & 0x7U;
+    if (Owner == 0) {
+      return (INT32)Index;
+    }
+  }
+
+  return RequireWriteOwner ? -1 : FirstMatch;
+}
+
+STATIC
+EFI_STATUS
+WaitForSpmi (
+  IN UINTN  StatusAddress
+  )
+{
+  UINT32 Retry;
+
+  for (Retry = 0; Retry < 1000; Retry++) {
+    UINT32 Status;
+
+    Status = MmioRead32 (StatusAddress);
+    if ((Status & PMIC_ARB_STATUS_DONE) != 0) {
+      return ((Status & PMIC_ARB_STATUS_ERROR) == 0) ? EFI_SUCCESS : EFI_DEVICE_ERROR;
+    }
+    MicroSecondDelay (1);
+  }
+
+  return EFI_TIMEOUT;
+}
+
+STATIC
+EFI_STATUS
+SpmiRead (
+  IN  UINT16  Address,
+  OUT UINT8   *Value
+  )
+{
+  INT32       Apid;
+  UINTN       Channel;
+  EFI_STATUS  Status;
+
+  Apid = FindApid ((UINT16)((PM8150L_SID << 8) | (Address >> 8)), FALSE);
+  if (Apid < 0) {
+    return EFI_NOT_FOUND;
+  }
+
+  Channel = PMIC_ARB_OBSERVER_BASE + (0x80U * (UINT32)Apid);
+  MmioWrite32 (Channel + PMIC_ARB_CMD, (PMIC_ARB_OP_EXT_READL << 27) | ((Address & 0xFFU) << 4));
+  Status = WaitForSpmi (Channel + PMIC_ARB_STATUS);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+
+  *Value = (UINT8)MmioRead32 (Channel + PMIC_ARB_RDATA0);
+  return EFI_SUCCESS;
+}
+
+STATIC
+EFI_STATUS
+SpmiWrite (
+  IN UINT16  Address,
+  IN UINT8   Value
+  )
+{
+  INT32  Apid;
+  UINTN  Channel;
+
+  Apid = FindApid ((UINT16)((PM8150L_SID << 8) | (Address >> 8)), TRUE);
+  if (Apid < 0) {
+    return EFI_ACCESS_DENIED;
+  }
+
+  Channel = PMIC_ARB_CHNLS_BASE + (0x10000U * (UINT32)Apid);
+  MmioWrite32 (Channel + PMIC_ARB_WDATA0, Value);
+  MmioWrite32 (Channel + PMIC_ARB_CMD, (PMIC_ARB_OP_EXT_WRITEL << 27) | ((Address & 0xFFU) << 4));
+  return WaitForSpmi (Channel + PMIC_ARB_STATUS);
+}
+
+/**
+  Print one LDO's identity/state and, if it is a real LDO that is switched off, turn it on.
+**/
+STATIC
+VOID
+PowerLdo (
+  IN CONST CHAR16  *Name,
+  IN UINT16        Base
+  )
+{
+  UINT8       Type;
+  UINT8       Sub;
+  UINT8       Stat;
+  UINT8       Lb;
+  UINT8       Ub;
+  UINT8       En;
+  EFI_STATUS  Status;
+  BOOLEAN     WasOn;
+
+  Type = Sub = Stat = Lb = Ub = En = 0xEE;
+  Status  = SpmiRead (Base + LDO_REG_TYPE, &Type);
+  Status |= SpmiRead (Base + LDO_REG_SUBTYPE, &Sub);
+  Status |= SpmiRead (Base + LDO_REG_STATUS1, &Stat);
+  Status |= SpmiRead (Base + LDO_REG_VSET_LB, &Lb);
+  Status |= SpmiRead (Base + LDO_REG_VSET_UB, &Ub);
+  Status |= SpmiRead (Base + LDO_REG_ENABLE, &En);
+
+  if (EFI_ERROR (Status) || (Type != LDO_TYPE)) {
+    Print (L"  %s @%04x: type %02x sub %02x (not a readable LDO, skipped) %r\r\n",
+           Name, Base, Type, Sub, Status);
+    return;
+  }
+
+  WasOn = (En & LDO_ENABLE_BIT) != 0;
+  Print (L"  %s @%04x: sub %02x st %02x vset %02x%02x en %02x (%s)\r\n",
+         Name, Base, Sub, Stat, Ub, Lb, En, WasOn ? L"already on" : L"off");
+
+  if (!WasOn) {
+    Status = SpmiWrite (Base + LDO_REG_ENABLE, (UINT8)(En | LDO_ENABLE_BIT));
+    MicroSecondDelay (3000);
+    En = Stat = 0xEE;
+    SpmiRead (Base + LDO_REG_ENABLE, &En);
+    SpmiRead (Base + LDO_REG_STATUS1, &Stat);
+    Print (L"    enable write %r -> en %02x st %02x\r\n", Status, En, Stat);
+  }
+}
+
+//
+// ---------------------------------------------------------------------------- GPIO
+//
 
 STATIC
 VOID
-ShowPin (
-  IN UINT32        TileBase,
-  IN UINT32        Gpio,
-  IN CONST CHAR16  *Role
+PinSetup (
+  IN UINT32  Tile,
+  IN UINT32  Gpio,
+  IN UINT32  Ctl
   )
 {
-  UINT32 Ctl;
-  UINT32 Io;
+  MmioWrite32 (Tile + TLMM_PIN_STRIDE * Gpio, Ctl);
+}
 
-  Ctl = MmioRead32 (TileBase + TLMM_PIN_STRIDE * Gpio);
-  Io  = MmioRead32 (TileBase + TLMM_PIN_STRIDE * Gpio + 4);
-  // ctl: pull [1:0] (0 none, 1 down, 3 up), function [5:2], drive [8:6], output enable bit 9.
-  Print (L"  gpio%-3u %-9s ctl %08x func %u pull %u drive %u oe %u | io %08x (in %u out %u)\r\n",
-         Gpio, Role, Ctl, (Ctl >> 2) & 0xF, Ctl & 3, (Ctl >> 6) & 7, (Ctl >> 9) & 1,
-         Io, Io & 1, (Io >> 1) & 1);
+STATIC
+VOID
+PinOutput (
+  IN UINT32   Tile,
+  IN UINT32   Gpio,
+  IN BOOLEAN  High
+  )
+{
+  MmioWrite32 (Tile + TLMM_PIN_STRIDE * Gpio + 4, High ? BIT1 : 0);
+}
+
+STATIC
+UINT32
+PinInput (
+  IN UINT32  Tile,
+  IN UINT32  Gpio
+  )
+{
+  return MmioRead32 (Tile + TLMM_PIN_STRIDE * Gpio + 4) & 1;
+}
+
+//
+// ---------------------------------------------------------------------------- GENI SPI
+//
+
+STATIC
+UINT16
+CrcKermit (
+  IN CONST UINT8  *Data,
+  IN UINTN        Len
+  )
+{
+  UINT16 Crc;
+  UINTN  I;
+  UINTN  J;
+
+  Crc = 0xFFFF;
+  for (I = 0; I < Len; I++) {
+    Crc ^= Data[I];
+    for (J = 0; J < 8; J++) {
+      Crc = ((Crc & 1) != 0) ? (UINT16)((Crc >> 1) ^ 0x8408) : (UINT16)(Crc >> 1);
+    }
+  }
+  return Crc;
+}
+
+STATIC
+VOID
+GeniPackingEightBit (
+  VOID
+  )
+{
+  // Port of geni_se_config_packing (bpw 8, 4 words per FIFO entry, MSB first, TX and RX).
+  UINT32 Cfg[4];
+  UINT32 Idx;
+  UINT32 I;
+
+  Idx = 7;
+  for (I = 0; I < 4; I++) {
+    Cfg[I]  = (Idx << 5) | (1U << 4) | (7U << 1);
+    Idx     = ((I + 1) * 8) + 7;
+  }
+  Cfg[3] |= BIT0;     // stop bit on the last vector
+
+  SE_WRITE (GENI_TX_PACKING_CFG0, Cfg[0] | (Cfg[1] << 10));
+  SE_WRITE (GENI_TX_PACKING_CFG1, Cfg[2] | (Cfg[3] << 10));
+  SE_WRITE (GENI_RX_PACKING_CFG0, Cfg[0] | (Cfg[1] << 10));
+  SE_WRITE (GENI_RX_PACKING_CFG1, Cfg[2] | (Cfg[3] << 10));
+  SE_WRITE (GENI_BYTE_GRAN, 0);
+}
+
+STATIC
+VOID
+GeniInit (
+  VOID
+  )
+{
+  UINT32 Depth;
+
+  // geni_se_init(): clear interrupts, force clock gating off, default IO.
+  SE_WRITE (GENI_M_IRQ_CLEAR, 0xFFFFFFFFU);
+  SE_WRITE (GENI_S_IRQ_CLEAR, 0xFFFFFFFFU);
+  SE_WRITE (DMA_TX_IRQ_CLR, 0xFFFFFFFFU);
+  SE_WRITE (DMA_RX_IRQ_CLR, 0xFFFFFFFFU);
+
+  SE_WRITE (GENI_CGC_CTRL, SE_READ (GENI_CGC_CTRL) | 0x7FU);
+  SE_WRITE (DMA_GENERAL_CFG, SE_READ (DMA_GENERAL_CFG) | 0xFU);
+  SE_WRITE (GENI_OUTPUT_CTRL, 0x7FU);
+  SE_WRITE (GENI_FORCE_DEFAULT, BIT0);
+  SE_WRITE (GENI_SE_IRQ_EN, SE_READ (GENI_SE_IRQ_EN) | 0xFU);
+
+  Depth = (SE_READ (GENI_HW_PARAM_0) >> 16) & 0x3FU;
+  SE_WRITE (GENI_RX_WATERMARK, (Depth > 3) ? Depth - 3 : 1);
+  SE_WRITE (GENI_RX_RFR_WATERMARK, (Depth > 2) ? Depth - 2 : 1);
+  SE_WRITE (GENI_M_IRQ_EN, SE_READ (GENI_M_IRQ_EN) | 0x7EU | M_CMD_DONE);
+
+  // FIFO mode (no DMA), SPI mode 0, CS0, no loopback.
+  SE_WRITE (GENI_DMA_MODE_EN, SE_READ (GENI_DMA_MODE_EN) & ~BIT0);
+  SE_WRITE (SPI_LOOPBACK, 0);
+  SE_WRITE (SPI_DEMUX_SEL, 0);
+  SE_WRITE (SPI_CPHA, 0);
+  SE_WRITE (SPI_CPOL, 0);
+  SE_WRITE (SPI_DEMUX_OUTPUT_INV, 0);
+  SE_WRITE (SPI_TRANS_CFG, SE_READ (SPI_TRANS_CFG) & ~BIT1);   // no CS toggle between words
+
+  GeniPackingEightBit ();
+  SE_WRITE (SPI_WORD_LEN, (8 - 4) & 0x3FFU);
+
+  // Core clock from XO (source 0), divided by SPI_DIV.
+  SE_WRITE (GENI_CLK_SEL, 0);
+  SE_WRITE (GENI_SER_M_CLK_CFG, (SPI_DIV << 4) | BIT0);
+}
+
+/**
+  One full-duplex SPI transfer of Len bytes (Len <= 12).  Returns EFI_SUCCESS when the
+  controller reports done and all bytes are back.
+**/
+STATIC
+EFI_STATUS
+GeniTransfer (
+  IN  CONST UINT8  *Tx,
+  OUT UINT8        *Rx,
+  IN  UINTN        Len,
+  OUT UINT32       *IrqStatus
+  )
+{
+  UINT32  Word;
+  UINTN   I;
+  UINTN   Got;
+  UINT32  Timeout;
+  UINT32  Wc;
+
+  SE_WRITE (GENI_M_IRQ_CLEAR, 0xFFFFFFFFU);
+  SE_WRITE (SPI_TX_TRANS_LEN, (UINT32)Len);
+  SE_WRITE (SPI_RX_TRANS_LEN, (UINT32)Len);
+  SE_WRITE (GENI_M_CMD0, (SPI_TX_RX_OPCODE << 27));         // no FRAGMENTATION: CS drops at end
+
+  for (I = 0; I < Len; I += 4) {
+    Word = 0;
+    if (I + 0 < Len) Word |= (UINT32)Tx[I + 0];
+    if (I + 1 < Len) Word |= (UINT32)Tx[I + 1] << 8;
+    if (I + 2 < Len) Word |= (UINT32)Tx[I + 2] << 16;
+    if (I + 3 < Len) Word |= (UINT32)Tx[I + 3] << 24;
+    SE_WRITE (GENI_TX_FIFO, Word);
+  }
+
+  for (Timeout = 0; Timeout < 50000; Timeout++) {            // up to 50 ms
+    if ((SE_READ (GENI_M_IRQ_STATUS) & M_CMD_DONE) != 0) {
+      break;
+    }
+    MicroSecondDelay (1);
+  }
+  *IrqStatus = SE_READ (GENI_M_IRQ_STATUS);
+
+  if (Timeout >= 50000) {
+    SE_WRITE (GENI_M_CMD_CTRL, BIT2);                        // cancel
+    MicroSecondDelay (2000);
+    SE_WRITE (GENI_M_CMD_CTRL, BIT1);                        // abort
+    MicroSecondDelay (2000);
+    return EFI_TIMEOUT;
+  }
+
+  Got = 0;
+  Wc  = SE_READ (GENI_RX_FIFO_STATUS) & 0x1FFFFFFU;
+  while ((Wc > 0) && (Got < Len)) {
+    Word = SE_READ (GENI_RX_FIFO);
+    for (I = 0; I < 4 && Got < Len; I++) {
+      Rx[Got++] = (UINT8)(Word >> (8 * I));
+    }
+    Wc--;
+  }
+
+  return (Got == Len) ? EFI_SUCCESS : EFI_END_OF_MEDIA;
+}
+
+/**
+  Read one FTS register with the FocalTech SPI framing and CRC.
+**/
+STATIC
+EFI_STATUS
+FtsReadReg (
+  IN  UINT8   Reg,
+  OUT UINT8   *Value,
+  OUT UINT8   *Raw       // FTS_XFER_LEN bytes of the raw response
+  )
+{
+  UINT8       Tx[FTS_XFER_LEN];
+  UINT32      Irq;
+  EFI_STATUS  Status;
+  UINT16      CrcCalc;
+  UINT16      CrcRead;
+
+  ZeroMem (Tx, sizeof (Tx));
+  ZeroMem (Raw, FTS_XFER_LEN);
+  Tx[0] = Reg;
+  Tx[1] = FTS_READ_CMD;
+  Tx[2] = 0;
+  Tx[3] = 1;                                                 // one data byte
+
+  Status = GeniTransfer (Tx, Raw, FTS_XFER_LEN, &Irq);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+
+  *Value = Raw[FTS_HEADER + FTS_DUMMY];
+  if ((Raw[3] & 0xA0U) != 0) {
+    return EFI_NOT_READY;                                    // chip reports busy/error status
+  }
+
+  CrcCalc = CrcKermit (&Raw[FTS_HEADER + FTS_DUMMY], 1);
+  CrcRead = (UINT16)(Raw[FTS_HEADER + FTS_DUMMY + 2] << 8) | Raw[FTS_HEADER + FTS_DUMMY + 1];
+  return (CrcCalc == CrcRead) ? EFI_SUCCESS : EFI_CRC_ERROR;
+}
+
+//
+// ---------------------------------------------------------------------------- main
+//
+
+STATIC
+BOOLEAN
+EnableQupClocks (
+  VOID
+  )
+{
+  UINT32  Retry;
+  UINT32  M;
+  UINT32  S;
+  UINT32  C;
+
+  MmioWrite32 (GCC_BASE + GCC_QUP_VOTE_REG,
+               MmioRead32 (GCC_BASE + GCC_QUP_VOTE_REG) | QUP_VOTE_BITS);
+
+  for (Retry = 0; Retry < 1000; Retry++) {
+    M = MmioRead32 (GCC_BASE + GCC_WRAP0_M_AHB_HALT);
+    S = MmioRead32 (GCC_BASE + GCC_WRAP0_S_AHB_HALT);
+    C = MmioRead32 (GCC_BASE + GCC_WRAP0_S4_HALT);
+    if (((M | S | C) & BIT31) == 0) {
+      Print (L"  QUP clocks on (m %08x s %08x se4 %08x, rcg cfg %08x)\r\n", M, S, C,
+             MmioRead32 (GCC_BASE + GCC_WRAP0_S4_RCG + 4));
+      return TRUE;
+    }
+    MicroSecondDelay (10);
+  }
+
+  Print (L"  QUP clocks did NOT start (m %08x s %08x se4 %08x)\r\n", M, S, C);
+  return FALSE;
 }
 
 STATIC
@@ -59,50 +572,89 @@ MunchTouchReadyToBoot (
   IN VOID       *Context
   )
 {
-  UINT32  Vote;
-  UINT32  MAhb;
-  UINT32  SAhb;
-  UINT32  S4;
-  BOOLEAN ClocksOn;
+  UINT32      Fw;
+  UINT32      Attempt;
+  UINT8       Raw[FTS_XFER_LEN];
+  UINT8       Id1;
+  UINT8       Id2;
+  EFI_STATUS  S1;
+  EFI_STATUS  S2;
+  UINT32      I;
 
   gBS->CloseEvent (Event);
 
-  Vote = MmioRead32 (GCC_BASE + GCC_QUP_VOTE_REG);
-  MAhb = MmioRead32 (GCC_BASE + GCC_WRAP0_M_AHB_HALT);
-  SAhb = MmioRead32 (GCC_BASE + GCC_WRAP0_S_AHB_HALT);
-  S4   = MmioRead32 (GCC_BASE + GCC_WRAP0_S4_HALT);
+  Print (L"\r\nMunchTouch step 2\r\n");
 
-  Print (L"\r\nMunchTouch probe\r\n");
-  Print (L"  QUP vote reg %08x (m_ahb %u s_ahb %u se4 %u)\r\n", Vote,
-         (Vote >> 6) & 1, (Vote >> 7) & 1, (Vote >> 14) & 1);
-  Print (L"  wrap0 m_ahb %08x %s  s_ahb %08x %s  se4 %08x %s\r\n",
-         MAhb, ((MAhb & BIT31) != 0) ? L"OFF" : L"on",
-         SAhb, ((SAhb & BIT31) != 0) ? L"OFF" : L"on",
-         S4,   ((S4 & BIT31) != 0)   ? L"OFF" : L"on");
-  Print (L"  se4 rcg cmd %08x cfg %08x\r\n",
-         MmioRead32 (GCC_BASE + GCC_WRAP0_S4_RCG),
-         MmioRead32 (GCC_BASE + GCC_WRAP0_S4_RCG + 4));
-
-  ShowPin (TLMM_NORTH, 119, L"spi4");
-  ShowPin (TLMM_NORTH, 120, L"spi4");
-  ShowPin (TLMM_NORTH, 121, L"spi4");
-  ShowPin (TLMM_NORTH, 122, L"spi4");
-  ShowPin (TLMM_SOUTH, 33,  L"ts-reset");
-  ShowPin (TLMM_SOUTH, 39,  L"ts-irq");
-  ShowPin (TLMM_SOUTH, 38,  L"ts-rel");
-  ShowPin (TLMM_WEST,  140, L"ts-act");
-
-  ClocksOn = ((MAhb | SAhb | S4) & BIT31) == 0;
-  if (ClocksOn) {
-    // GENI serial engine: FW revision at +0x68, HW version at +0x60 (read only).
-    Print (L"  se4 regs: hw %08x fwrev %08x status %08x\r\n",
-           MmioRead32 (SE4_BASE + 0x60), MmioRead32 (SE4_BASE + 0x68),
-           MmioRead32 (SE4_BASE + 0x40));
-  } else {
-    Print (L"  se4 clocks not all on: SPI engine registers NOT read (safe)\r\n");
+  if (!EnableQupClocks ()) {
+    MicroSecondDelay (6000000);
+    return;
   }
 
-  MicroSecondDelay (6000000);
+  // Pins: SPI bus on gpio 8..11 (function 1, no pull, 6 mA); reset low, irq input pulled up.
+  for (I = 0; I < 4; I++) {
+    PinSetup (TLMM_NORTH, SPI_GPIO_FIRST + I, PIN_CTL (1, 0, 2, 0));
+  }
+  PinOutput (TLMM_SOUTH, TS_RESET_GPIO, FALSE);
+  PinSetup (TLMM_SOUTH, TS_RESET_GPIO, PIN_CTL (0, 3, 3, 1));
+  PinSetup (TLMM_SOUTH, TS_IRQ_GPIO, PIN_CTL (0, 3, 3, 0));
+  MicroSecondDelay (5000);
+
+  // Rails: 1.8 V I/O first, then 3.2 V core (same order as the Linux driver).
+  PowerLdo (L"L1 ", LDO1_BASE);
+  MicroSecondDelay (2000);
+  PowerLdo (L"L10", LDO10_BASE);
+  MicroSecondDelay (5000);
+
+  // Release reset and give the chip time to boot.
+  PinOutput (TLMM_SOUTH, TS_RESET_GPIO, TRUE);
+  MicroSecondDelay (300000);
+  Print (L"  reset released, irq pin %u\r\n", PinInput (TLMM_SOUTH, TS_IRQ_GPIO));
+
+  // Serial engine.  Registers are only touched now that the clocks are confirmed running.
+  Fw = SE_READ (GENI_FW_REVISION_RO);
+  Print (L"  se4: fw %08x proto %u hw0 %08x ifdis %08x lock %08x\r\n",
+         Fw, (Fw >> 8) & 0xFF, SE_READ (GENI_HW_PARAM_0),
+         SE_READ (GENI_IF_DISABLE_RO), SE_READ (GENI_MULTILOCK_MSA_RO));
+
+  if (((Fw >> 8) & 0xFFU) != SPI_PROTOCOL) {
+    Print (L"  SE4 firmware is not SPI (proto %u): stopping\r\n", (Fw >> 8) & 0xFF);
+    MicroSecondDelay (8000000);
+    return;
+  }
+  if ((SE_READ (GENI_IF_DISABLE_RO) & BIT0) != 0) {
+    Print (L"  SE4 FIFO interface disabled (GPI DMA only): stopping\r\n");
+    MicroSecondDelay (8000000);
+    return;
+  }
+
+  GeniInit ();
+  Print (L"  se4 initialised, clk cfg %08x status %08x\r\n",
+         SE_READ (GENI_SER_M_CLK_CFG), SE_READ (GENI_STATUS));
+
+  Id1 = Id2 = 0;
+  S1 = S2 = EFI_NOT_STARTED;
+  for (Attempt = 0; Attempt < 5; Attempt++) {
+    S1 = FtsReadReg (FTS_REG_CHIP_ID, &Id1, Raw);
+    if (Attempt == 0 || !EFI_ERROR (S1)) {
+      Print (L"  A3 raw: %02x %02x %02x %02x | %02x %02x %02x | %02x | %02x %02x  %r\r\n",
+             Raw[0], Raw[1], Raw[2], Raw[3], Raw[4], Raw[5], Raw[6], Raw[7], Raw[8], Raw[9], S1);
+    }
+    if (!EFI_ERROR (S1)) {
+      S2 = FtsReadReg (FTS_REG_CHIP_ID2, &Id2, Raw);
+      break;
+    }
+    MicroSecondDelay (50000);
+  }
+
+  if (EFI_ERROR (S1)) {
+    Print (L"  last attempt raw: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x  %r\r\n",
+           Raw[0], Raw[1], Raw[2], Raw[3], Raw[4], Raw[5], Raw[6], Raw[7], Raw[8], Raw[9], S1);
+    Print (L"  Touch chip ID: NOT READ (%r) m_irq %08x\r\n", S1, SE_READ (GENI_M_IRQ_STATUS));
+  } else {
+    Print (L"  Touch chip ID: %02x %02x (expect 56 52)  %r\r\n", Id1, Id2, S2);
+  }
+
+  MicroSecondDelay (10000000);
 }
 
 EFI_STATUS

@@ -391,6 +391,7 @@ GeniInit (
   UINT32 Depth;
 
   // geni_se_init(): clear interrupts, force clock gating off, default IO.
+  SE_WRITE (0xE18, 0);                          // SE_GSI_EVENT_EN
   SE_WRITE (GENI_M_IRQ_CLEAR, 0xFFFFFFFFU);
   SE_WRITE (GENI_S_IRQ_CLEAR, 0xFFFFFFFFU);
   SE_WRITE (DMA_TX_IRQ_CLR, 0xFFFFFFFFU);
@@ -434,7 +435,8 @@ GeniTransfer (
   IN  CONST UINT8  *Tx,
   OUT UINT8        *Rx,
   IN  UINTN        Len,
-  OUT UINT32       *IrqStatus
+  OUT UINT32       *IrqStatus,
+  IN  BOOLEAN      FillFirst
   )
 {
   UINT32  Word;
@@ -446,7 +448,9 @@ GeniTransfer (
   SE_WRITE (GENI_M_IRQ_CLEAR, 0xFFFFFFFFU);
   SE_WRITE (SPI_TX_TRANS_LEN, (UINT32)Len);
   SE_WRITE (SPI_RX_TRANS_LEN, (UINT32)Len);
-  SE_WRITE (GENI_M_CMD0, (SPI_TX_RX_OPCODE << 27));         // no FRAGMENTATION: CS drops at end
+  if (!FillFirst) {
+    SE_WRITE (GENI_M_CMD0, (SPI_TX_RX_OPCODE << 27));       // no FRAGMENTATION: CS drops at end
+  }
 
   for (I = 0; I < Len; I += 4) {
     Word = 0;
@@ -455,6 +459,9 @@ GeniTransfer (
     if (I + 2 < Len) Word |= (UINT32)Tx[I + 2] << 16;
     if (I + 3 < Len) Word |= (UINT32)Tx[I + 3] << 24;
     SE_WRITE (GENI_TX_FIFO, Word);
+  }
+  if (FillFirst) {
+    SE_WRITE (GENI_M_CMD0, (SPI_TX_RX_OPCODE << 27));
   }
 
   for (Timeout = 0; Timeout < 50000; Timeout++) {            // up to 50 ms
@@ -510,7 +517,7 @@ FtsReadReg (
   Tx[2] = 0;
   Tx[3] = 1;                                                 // one data byte
 
-  Status = GeniTransfer (Tx, Raw, FTS_XFER_LEN, &Irq);
+  Status = GeniTransfer (Tx, Raw, FTS_XFER_LEN, &Irq, FALSE);
   if (EFI_ERROR (Status)) {
     return Status;
   }
@@ -674,19 +681,16 @@ RscInit (
 
   Id    = MmioRead32 (RSC_DRV2_BASE + RSC_DRV_ID_REG);
   Major = (Id >> 16) & 0xFFU;
-  Print (L"  RSC drv2 id %08x\r\n", Id);
   if ((Major == 0) || (Major > 3)) {
     Print (L"  RSC id unexpected, not touching it\r\n");
     return FALSE;
   }
   mR  = (Major >= 3) ? &mRegs30 : &mRegs27;
   Cfg = MmioRead32 (RSC_DRV2_BASE + RSC_DRV_CHILD_CFG);
-  Print (L"  RSC child cfg %08x (tcs for drv2: %u)\r\n", Cfg, (Cfg >> (6 * RSC_DRV_ID_NUM)) & 0x3FU);
 
   for (I = RSC_FIRST_ACTIVE_TCS; I < RSC_FIRST_ACTIVE_TCS + RSC_ACTIVE_TCS_COUNT; I++) {
     UINT32 En   = TcsRead (I, mR->CmdEnable);
     UINT32 Ctl  = TcsRead (I, mR->Control);
-    Print (L"  tcs%u: cmd_enable %08x control %08x\r\n", I, En, Ctl);
     if ((mTcs == 0xFFFFFFFFU) && (En == 0) && ((Ctl & TCS_AMC_TRIGGER) == 0)) {   // bootloader leaves AMC enable set
       mTcs = I;
     }
@@ -696,6 +700,7 @@ RscInit (
     return FALSE;
   }
   MmioWrite32 (RSC_DRV2_BASE + RSC_TCS_OFFSET + mR->IrqClear, BIT0 << mTcs);
+  Print (L"  rsc id %08x cfg %08x using tcs%u\r\n", Id, Cfg, mTcs);
   return TRUE;
 }
 
@@ -972,16 +977,28 @@ MunchTouchReadyToBoot (
   Print (L"  se4 initialised, clk cfg %08x status %08x\r\n",
          SE_READ (GENI_SER_M_CLK_CFG), SE_READ (GENI_STATUS));
 
+  // Register readback: do the writes stick?
+  Print (L"  tx pk %08x %08x rx pk %08x %08x gran %x wl %x trcfg %x\r\n",
+         SE_READ (GENI_TX_PACKING_CFG0), SE_READ (GENI_TX_PACKING_CFG1),
+         SE_READ (GENI_RX_PACKING_CFG0), SE_READ (GENI_RX_PACKING_CFG1),
+         SE_READ (GENI_BYTE_GRAN), SE_READ (SPI_WORD_LEN), SE_READ (SPI_TRANS_CFG));
+
   // Self test: SE loopback (MOSI -> MISO inside the engine) proves clocks and FIFOs work.
   {
     UINT8   LbTx[4] = {0xA5, 0x3C, 0x0F, 0xF0};
-    UINT8   LbRx[4] = {0, 0, 0, 0};
+    UINT8   LbRx[4];
     UINT32  LbIrq;
+    UINT32  Variant;
 
-    SE_WRITE (SPI_LOOPBACK, 1);
-    S1 = GeniTransfer (LbTx, LbRx, 4, &LbIrq);
-    SE_WRITE (SPI_LOOPBACK, 0);
-    Print (L"  loopback: %02x %02x %02x %02x (want a5 3c 0f f0) %r\r\n", LbRx[0], LbRx[1], LbRx[2], LbRx[3], S1);
+    for (Variant = 0; Variant < 2; Variant++) {
+      SetMem (LbRx, sizeof (LbRx), 0xEE);
+      SE_WRITE (SPI_LOOPBACK, 1);
+      S1 = GeniTransfer (LbTx, LbRx, 4, &LbIrq, Variant == 1);
+      Print (L"  loopback%u: %02x %02x %02x %02x %r irq %08x txst %08x rxst %08x lb %x\r\n", Variant,
+             LbRx[0], LbRx[1], LbRx[2], LbRx[3], S1, LbIrq, SE_READ (0x800), SE_READ (GENI_RX_FIFO_STATUS),
+             SE_READ (SPI_LOOPBACK));
+      SE_WRITE (SPI_LOOPBACK, 0);
+    }
   }
 
   // Is MISO driven by the chip?  Read the pin without and with a pull-up.
@@ -1005,14 +1022,18 @@ MunchTouchReadyToBoot (
     Print (L"  mode %u A3: %02x %02x %02x %02x|%02x %02x %02x|%02x|%02x %02x %r\r\n", Attempt,
            Raw[0], Raw[1], Raw[2], Raw[3], Raw[4], Raw[5], Raw[6], Raw[7], Raw[8], Raw[9], S1);
 
+    if (Attempt != 0) {
+      goto SkipNoCrc;
+    }
     ZeroMem (Tx2, sizeof (Tx2));
     Tx2[0] = FTS_REG_CHIP_ID;
     Tx2[1] = 0x80;                                            // read, no CRC
     Tx2[3] = 1;
-    GeniTransfer (Tx2, Rx2, FTS_XFER_LEN, &Irq2);
+    GeniTransfer (Tx2, Rx2, FTS_XFER_LEN, &Irq2, FALSE);
     Print (L"         no-crc: %02x %02x %02x %02x|%02x %02x %02x|%02x|%02x %02x\r\n",
            Rx2[0], Rx2[1], Rx2[2], Rx2[3], Rx2[4], Rx2[5], Rx2[6], Rx2[7], Rx2[8], Rx2[9]);
 
+SkipNoCrc:
     if (!EFI_ERROR (S1)) {
       S2 = FtsReadReg (FTS_REG_CHIP_ID2, &Id2, Raw);
       break;

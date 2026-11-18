@@ -46,6 +46,12 @@
 #define DWC3_DCFG                    0xC700U
 #define DWC3_DCTL                    0xC704U
 #define DWC3_DSTS                    0xC70CU
+// Qualcomm glue ("QSCRATCH") registers, see Linux dwc3-qcom.c.
+#define QSCRATCH_BASE                (USB_BASE + 0xF8800U)
+#define QSCRATCH_GENERAL_CFG         0x08U
+#define PIPE_UTMI_CLK_SEL            BIT0
+#define PIPE3_PHYSTATUS_SW           BIT3
+#define PIPE_UTMI_CLK_DIS            BIT8
 #define DWC3_GCTL_PRTCAPDIR_MASK     (BIT12 | BIT13)
 #define DWC3_GCTL_PRTCAP_HOST        (1U << 12)
 #define DWC3_DCTL_RUN_STOP           BIT31
@@ -149,6 +155,17 @@ SwitchToHost (
                GccRead (GCC_USB30_PRIM_MOCK_UTMI_CBCR) | BIT0);
   Print (L"%s (cbcr %08x)\r\n", WaitClockOn (GCC_USB30_PRIM_MOCK_UTMI_CBCR) ? L"on" : L"TIMEOUT",
          GccRead (GCC_USB30_PRIM_MOCK_UTMI_CBCR));
+
+  // 1b. No USB 3.0 PHY is running (phy_pipe_clk is off), so use the UTMI clock as
+  //     the PIPE clock. Same sequence as dwc3_qcom_select_utmi_clk() in Linux; used
+  //     when the controller operates high-speed only.
+  Print (L"Selecting UTMI as PIPE clock... ");
+  MmioOr32 (QSCRATCH_BASE + QSCRATCH_GENERAL_CFG, PIPE_UTMI_CLK_DIS);
+  MicroSecondDelay (500);
+  MmioOr32 (QSCRATCH_BASE + QSCRATCH_GENERAL_CFG, PIPE_UTMI_CLK_SEL | PIPE3_PHYSTATUS_SW);
+  MicroSecondDelay (500);
+  MmioAnd32 (QSCRATCH_BASE + QSCRATCH_GENERAL_CFG, ~(UINT32)PIPE_UTMI_CLK_DIS);
+  Print (L"cfg %08x\r\n", MmioRead32 (QSCRATCH_BASE + QSCRATCH_GENERAL_CFG));
 
   // 2. If the bootloader left the device controller running, stop it.
   if ((UsbRead (DWC3_DCTL) & DWC3_DCTL_RUN_STOP) != 0) {

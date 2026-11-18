@@ -135,6 +135,7 @@ bcdedit /store BCD /set {default} bootstatuspolicy IgnoreAllFailures
 
 ### How USB host was made to work
 * The bootloader leaves the USB controller powered, with most clocks running, but in **device mode** and with `mock_utmi_clk` off. Qualcomm's own USB bring-up driver (`UsbConfigDxe`) never runs on this platform because it waits for a protocol nothing provides.
+* The USB 2.0 PHY is only configured by the bootloader in fastboot mode, so `MunchUsbDxe` also runs the Linux Synopsys-femto PHY init (with munch's tuning values from the device tree) on every boot; without it the mouse worked only right after a flash and died after any restart (Windows logged *port reset failed*).
 * `MunchUsbDxe` (firmware) enables the UTMI clock, selects UTMI as the PIPE clock (the port is USB 2.0 only, so the USB 3.0 PHY is not needed; same trick as Linux `dwc3_qcom_select_utmi_clk`), stops the device controller and switches the core to host mode. It prints one status line before boot.
 * The DSDT exposes `USB0` as a plain ACPI xHCI (`PNP0D10`). Qualcomm's `qcxhcifilter` driver (`QCOM25A6`) hangs Windows with `CLOCK_WATCHDOG_TIMEOUT`, so it is not used.
 * Windows' own USB-C stack is not used either: the Type-C port manager and URS role switch depend on Qualcomm's PEP (power engine), and the real `QCOM2519` PEP fails to start (`CM_PROB_FAILED_ADD`) without full SM8250 clock/power tables. USB therefore only works as a host. (The phone has a USB 2.0 port, so nothing is lost on speed.)

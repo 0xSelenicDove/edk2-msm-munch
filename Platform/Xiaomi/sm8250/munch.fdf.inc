@@ -5,6 +5,8 @@ FILE FREEFORM = 7E374E25-8E01-4FEE-87F2-390C23C606CD {
   SECTION RAW = Silicon/Qualcomm/sm8250/AcpiTables/Facp.aml
   SECTION RAW = Silicon/Qualcomm/sm8250/AcpiTables/Gtdt.aml
   SECTION RAW = Silicon/Qualcomm/sm8250/AcpiTables/bgrt.aml
+  // DMA remapping for the USB controller behind the apps SMMU (measured SM8250 data).
+  SECTION RAW = Silicon/Qualcomm/sm8250/AcpiTables/IortUsb.aml
   SECTION UI = "AcpiTables"
 }
 

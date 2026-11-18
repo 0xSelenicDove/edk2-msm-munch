@@ -105,12 +105,12 @@ Device (SYSM) {
 					ResourceTemplate(){Register(SystemMemory,0,0,0,0)},		// Usage counter register
 					"KryoSilver0.C2"							// Name
 				},
-				// C3
+				// C3 (PSCI 0x40000003 is not supported by this firmware; disabled to avoid INTERNAL_POWER_ERROR)
 				Package ()
 				{
 					1774,	// Min residency (us)
 					901,	// Wake latency (us)
-					1,	// Flags, set bit0 to 1 to enable this state
+					0,	// Flags, set bit0 to 1 to enable this state
 					1,	// Arch context last flags
 					0,	// Residency counter frequency
 					1,	// Enabled parent state (Enables D4)              0x40000003
@@ -178,12 +178,12 @@ Device (SYSM) {
 					ResourceTemplate(){Register(SystemMemory,0,0,0,0)},		// Usage counter register
 					"KryoSilver1.C2"							// Name
 				},
-				// C3
+				// C3 (PSCI 0x40000003 is not supported by this firmware; disabled to avoid INTERNAL_POWER_ERROR)
 				Package ()
 				{
 					1774,	// Min residency (us)
 					901,	// Wake latency (us)
-					1,	// Flags, set bit0 to 1 to enable this state
+					0,	// Flags, set bit0 to 1 to enable this state
 					1,	// Arch context last flags
 					0,	// Residency counter frequency
 					1,	// Enabled parent state (Enables D4)
@@ -251,12 +251,12 @@ Device (SYSM) {
 					ResourceTemplate(){Register(SystemMemory,0,0,0,0)},		// Usage counter register
 					"KryoSilver2.C2"							// Name
 				},
-				// C3
+				// C3 (PSCI 0x40000003 is not supported by this firmware; disabled to avoid INTERNAL_POWER_ERROR)
 				Package ()
 				{
 					1774,	// Min residency (us)
 					901,	// Wake latency (us)
-					1,	// Flags, set bit0 to 1 to enable this state
+					0,	// Flags, set bit0 to 1 to enable this state
 					1,	// Arch context last flags
 					0,	// Residency counter frequency
 					1,	// Enabled parent state (Enables D4)
@@ -323,12 +323,12 @@ Device (SYSM) {
 					ResourceTemplate(){Register(SystemMemory,0,0,0,0)},		// Usage counter register
 					"KryoSilver3.C2"							// Name
 				},
-				// C3
+				// C3 (PSCI 0x40000003 is not supported by this firmware; disabled to avoid INTERNAL_POWER_ERROR)
 				Package ()
 				{
 					1774,	// Min residency (us)
 					901,	// Wake latency (us)
-					1,	// Flags, set bit0 to 1 to enable this state
+					0,	// Flags, set bit0 to 1 to enable this state
 					1,	// Arch context last flags
 					0,	// Residency counter frequency
 					1,	// Enabled parent state (Enables D4)
@@ -396,12 +396,12 @@ Device (SYSM) {
 					ResourceTemplate(){Register(SystemMemory,0,0,0,0)},						 // Usage counter register
 					"KryoGold0.C2"														 // Name
 				},
-				// C3
+				// C3 (PSCI 0x40000003 is not supported by this firmware; disabled to avoid INTERNAL_POWER_ERROR)
 				Package ()
 				{
 					3850,	// Min residency (us)
 					860,	// Wake latency (us)
-					1,		// Flags, set bit0 to 1 to enable this state
+					0,		// Flags, set bit0 to 1 to enable this state
 					1,		// Arch context last flags
 					0,		// Residency counter frequency
 					1,		// Enabled parent state (Enables D4)
@@ -468,12 +468,12 @@ Device (SYSM) {
 					ResourceTemplate(){Register(SystemMemory,0,0,0,0)},						 // Usage counter register
 					"KryoGold1.C2"														 // Name
 				},
-				// C3
+				// C3 (PSCI 0x40000003 is not supported by this firmware; disabled to avoid INTERNAL_POWER_ERROR)
 				Package ()
 				{
 					3850,	// Min residency (us)
 					860,	// Wake latency (us)
-					1,		// Flags, set bit0 to 1 to enable this state
+					0,		// Flags, set bit0 to 1 to enable this state
 					1,		// Arch context last flags
 					0,		// Residency counter frequency
 					1,		// Enabled parent state (Enables D4)   0x40000003
@@ -540,12 +540,12 @@ Device (SYSM) {
 					ResourceTemplate(){Register(SystemMemory,0,0,0,0)},						 // Usage counter register
 					"KryoGold2.C2"														 // Name
 				},
-				// C3
+				// C3 (PSCI 0x40000003 is not supported by this firmware; disabled to avoid INTERNAL_POWER_ERROR)
 				Package ()
 				{
 					3850,	// Min residency (us)
 					860,	// Wake latency (us)
-					1,		// Flags, set bit0 to 1 to enable this state
+					0,		// Flags, set bit0 to 1 to enable this state
 					1,		// Arch context last flags
 					0,		// Residency counter frequency
 					1,		// Enabled parent state (Enables D4)  0x40000003
@@ -612,12 +612,12 @@ Device (SYSM) {
 					ResourceTemplate(){Register(SystemMemory,0,0,0,0)},						 // Usage counter register
 					"KryoPrime0.C2"														 // Name
 				},
-				// C3
+				// C3 (PSCI 0x40000003 is not supported by this firmware; disabled to avoid INTERNAL_POWER_ERROR)
 				Package ()
 				{
 					3990,	// Min residency (us)
 					1000,	// Wake latency (us)
-					1,		// Flags, set bit0 to 1 to enable this state
+					0,		// Flags, set bit0 to 1 to enable this state
 					1,		// Arch context last flags
 					0,		// Residency counter frequency
 					1,		// Enabled parent state (Enables D4)  0x40000003

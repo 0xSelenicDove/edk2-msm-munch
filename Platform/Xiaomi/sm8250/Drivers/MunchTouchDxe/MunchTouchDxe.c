@@ -733,7 +733,8 @@ RpmhSend (
 
   Status = EFI_TIMEOUT;
   for (I = 0; I < 100000; I++) {                              // up to 100 ms
-    if ((MmioRead32 (RSC_DRV2_BASE + RSC_TCS_OFFSET + mR->IrqStatus) & Bit) != 0) {
+    if (((MmioRead32 (RSC_DRV2_BASE + RSC_TCS_OFFSET + mR->IrqStatus) & Bit) != 0) ||
+        ((TcsRead (mTcs, mR->CmdStatus) & CMD_STATUS_COMPL) != 0)) {
       Status = EFI_SUCCESS;
       break;
     }
@@ -855,11 +856,6 @@ EnableQupClocks (
   if (WaitQupClocks (&M, &S, &C, 20)) {
     goto On;
   }
-  Print (L"  after vote: vote %08x m %08x s %08x se4 %08x core %08x 2x %08x\r\n",
-         MmioRead32 (GCC_BASE + GCC_QUP_VOTE_REG), M, S, C,
-         MmioRead32 (GCC_BASE + GCC_WRAP0_CORE_HALT),
-         MmioRead32 (GCC_BASE + GCC_WRAP0_CORE2X_HALT));
-
   // Stage 1: the s_ahb branch has hardware clock gating (bit 1).  With it on, the status bit
   // reads "off" whenever the branch is idle (Linux skips the halt check in that mode).  Turn
   // the gating off so the branch really stays running and the status becomes meaningful.
@@ -976,14 +972,47 @@ MunchTouchReadyToBoot (
   Print (L"  se4 initialised, clk cfg %08x status %08x\r\n",
          SE_READ (GENI_SER_M_CLK_CFG), SE_READ (GENI_STATUS));
 
+  // Self test: SE loopback (MOSI -> MISO inside the engine) proves clocks and FIFOs work.
+  {
+    UINT8   LbTx[4] = {0xA5, 0x3C, 0x0F, 0xF0};
+    UINT8   LbRx[4] = {0, 0, 0, 0};
+    UINT32  LbIrq;
+
+    SE_WRITE (SPI_LOOPBACK, 1);
+    S1 = GeniTransfer (LbTx, LbRx, 4, &LbIrq);
+    SE_WRITE (SPI_LOOPBACK, 0);
+    Print (L"  loopback: %02x %02x %02x %02x (want a5 3c 0f f0) %r\r\n", LbRx[0], LbRx[1], LbRx[2], LbRx[3], S1);
+  }
+
+  // Is MISO driven by the chip?  Read the pin without and with a pull-up.
+  Print (L"  miso level: no pull %u", PinInput (TLMM_NORTH, SPI_GPIO_FIRST));
+  PinSetup (TLMM_NORTH, SPI_GPIO_FIRST, PIN_CTL (1, 3, 2, 0));
+  MicroSecondDelay (1000);
+  Print (L", pull-up %u (irq %u)\r\n", PinInput (TLMM_NORTH, SPI_GPIO_FIRST), PinInput (TLMM_SOUTH, TS_IRQ_GPIO));
+  PinSetup (TLMM_NORTH, SPI_GPIO_FIRST, PIN_CTL (1, 0, 2, 0));
+
   Id1 = Id2 = 0;
   S1 = S2 = EFI_NOT_STARTED;
-  for (Attempt = 0; Attempt < 5; Attempt++) {
+  for (Attempt = 0; Attempt < 4; Attempt++) {
+    UINT8  Tx2[FTS_XFER_LEN];
+    UINT8  Rx2[FTS_XFER_LEN];
+    UINT32 Irq2;
+
+    SE_WRITE (SPI_CPHA, Attempt & 1);
+    SE_WRITE (SPI_CPOL, ((Attempt & 2) != 0) ? BIT2 : 0);
+
     S1 = FtsReadReg (FTS_REG_CHIP_ID, &Id1, Raw);
-    if (Attempt == 0 || !EFI_ERROR (S1)) {
-      Print (L"  A3 raw: %02x %02x %02x %02x | %02x %02x %02x | %02x | %02x %02x  %r\r\n",
-             Raw[0], Raw[1], Raw[2], Raw[3], Raw[4], Raw[5], Raw[6], Raw[7], Raw[8], Raw[9], S1);
-    }
+    Print (L"  mode %u A3: %02x %02x %02x %02x|%02x %02x %02x|%02x|%02x %02x %r\r\n", Attempt,
+           Raw[0], Raw[1], Raw[2], Raw[3], Raw[4], Raw[5], Raw[6], Raw[7], Raw[8], Raw[9], S1);
+
+    ZeroMem (Tx2, sizeof (Tx2));
+    Tx2[0] = FTS_REG_CHIP_ID;
+    Tx2[1] = 0x80;                                            // read, no CRC
+    Tx2[3] = 1;
+    GeniTransfer (Tx2, Rx2, FTS_XFER_LEN, &Irq2);
+    Print (L"         no-crc: %02x %02x %02x %02x|%02x %02x %02x|%02x|%02x %02x\r\n",
+           Rx2[0], Rx2[1], Rx2[2], Rx2[3], Rx2[4], Rx2[5], Rx2[6], Rx2[7], Rx2[8], Rx2[9]);
+
     if (!EFI_ERROR (S1)) {
       S2 = FtsReadReg (FTS_REG_CHIP_ID2, &Id2, Raw);
       break;
@@ -999,7 +1028,7 @@ MunchTouchReadyToBoot (
     Print (L"  Touch chip ID: %02x %02x (expect 56 52)  %r\r\n", Id1, Id2, S2);
   }
 
-  MicroSecondDelay (10000000);
+  MicroSecondDelay (20000000);
 }
 
 EFI_STATUS

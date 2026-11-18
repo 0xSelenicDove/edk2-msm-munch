@@ -10,6 +10,7 @@
   SKUID_IDENTIFIER               = DEFAULT
   FLASH_DEFINITION               = Platform/Qualcomm/sm8250/sm8250.fdf
   DEVICE_DXE_FV_COMPONENTS       = Platform/Xiaomi/sm8250/munch.fdf.inc
+  DEVICE_DXE_APRIORI_COMPONENTS  = Platform/Xiaomi/sm8250/munch-apriori.fdf.inc
 
 !include Platform/Qualcomm/sm8250/sm8250.dsc
 
@@ -28,3 +29,7 @@
   gRenegadePkgTokenSpaceGuid.PcdDeviceVendor|"Xiaomi"
   gRenegadePkgTokenSpaceGuid.PcdDeviceProduct|"POCO F4 / Redmi K40S"
   gRenegadePkgTokenSpaceGuid.PcdDeviceCodeName|"munch"
+
+[Components.common]
+  Platform/Xiaomi/sm8250/Drivers/MunchPmicVersionDxe/MunchPmicVersionDxe.inf
+  Platform/Xiaomi/sm8250/Drivers/MunchOtgDxe/MunchOtgDxe.inf

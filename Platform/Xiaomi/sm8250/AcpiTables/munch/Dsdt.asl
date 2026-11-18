@@ -9,7 +9,12 @@ DefinitionBlock("DSDT.AML", "DSDT", 0x02, "QCOMM ", "SDM850 ", 3)
         Include("dsdt_common.asl")
 		// Include("cust_dsdt.asl") 
 
-        // Include("usb.asl")
+        // Primary controller through the Windows USB Role Switch framework.
+        Include("usb_urs.asl")
+
+        // PM8150B Type-C/OTG control path used to negotiate host mode and
+        // switch on VBUS for the physical connector.
+        Include("pmic_typec.asl")
 
 		//
         // Buttons

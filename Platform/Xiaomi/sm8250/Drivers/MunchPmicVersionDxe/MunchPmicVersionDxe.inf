@@ -1,0 +1,21 @@
+[Defines]
+  INF_VERSION                    = 0x0001001B
+  BASE_NAME                      = MunchPmicVersionDxe
+  FILE_GUID                      = 9A5C5F78-1B5D-49DD-A91E-728AFEDC934A
+  MODULE_TYPE                    = DXE_DRIVER
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = MunchPmicVersionDxeEntryPoint
+
+[Sources]
+  MunchPmicVersionDxe.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+
+[LibraryClasses]
+  DebugLib
+  UefiBootServicesTableLib
+  UefiDriverEntryPoint
+
+[Depex]
+  TRUE

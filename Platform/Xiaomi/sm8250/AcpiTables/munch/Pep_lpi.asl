@@ -119,12 +119,12 @@ Device (SYSM) {
 					ResourceTemplate(){Register(SystemMemory,0,0,0,0)},		// Usage counter register
 					"KryoSilver0.C3"							// Name
 				},
-				// C4 
+				// C4 (PSCI 0x40000004; disabled: WFI-only idle for now)
 				Package ()
 				{
 					4001,	// Min residency (us)
 					915,	// Wake latency (us)
-					1,	// Flags, set bit0 to 1 to enable this state
+					0,	// Flags, set bit0 to 1 to enable this state
 					1,	// Arch context last flags
 					0,	// Residency counter frequency
 					2,	// Enabled parent state (Enables D4)              0x40000003
@@ -192,12 +192,12 @@ Device (SYSM) {
 					ResourceTemplate(){Register(SystemMemory,0,0,0,0)},		// Usage counter register
 					"KryoSilver1.C3"							// Name
 				},
-				// C4 
+				// C4 (PSCI 0x40000004; disabled: WFI-only idle for now)
 				Package ()
 				{
 					4001,	// Min residency (us)
 					915,	// Wake latency (us)
-					1,	// Flags, set bit0 to 1 to enable this state
+					0,	// Flags, set bit0 to 1 to enable this state
 					1,	// Arch context last flags
 					0,	// Residency counter frequency
 					2,	// Enabled parent state (Enables LLC)
@@ -265,12 +265,12 @@ Device (SYSM) {
 					ResourceTemplate(){Register(SystemMemory,0,0,0,0)},		// Usage counter register
 					"KryoSilver2.C3"							// Name
 				},
-				// C4 
+				// C4 (PSCI 0x40000004; disabled: WFI-only idle for now)
 				Package ()
 				{
 					4001,	// Min residency (us)
 					915,	// Wake latency (us)
-					1,	// Flags, set bit0 to 1 to enable this state
+					0,	// Flags, set bit0 to 1 to enable this state
 					1,	// Arch context last flags
 					0,	// Residency counter frequency
 					2,	// Enabled parent state (Enables LLC)
@@ -337,12 +337,12 @@ Device (SYSM) {
 					ResourceTemplate(){Register(SystemMemory,0,0,0,0)},		// Usage counter register
 					"KryoSilver3.C3"							// Name
 				},
-				// C4 
+				// C4 (PSCI 0x40000004; disabled: WFI-only idle for now)
 				Package ()
 				{
 					4001,	// Min residency (us)
 					915,	// Wake latency (us)
-					1,	// Flags, set bit0 to 1 to enable this state
+					0,	// Flags, set bit0 to 1 to enable this state
 					1,	// Arch context last flags
 					0,	// Residency counter frequency
 					2,	// Enabled parent state (Enables LLC)
@@ -410,12 +410,12 @@ Device (SYSM) {
 					ResourceTemplate(){Register(SystemMemory,0,0,0,0)},				  	  // Usage counter register
 					"KryoGold0.C3"													  // Name
 				},
-				// C4 
+				// C4 (PSCI 0x40000004; disabled: WFI-only idle for now)
 				Package ()
 				{
 					3950,	// Min residency (us)
 					910,	// Wake latency (us)
-					1,		// Flags, set bit0 to 1 to enable this state
+					0,		// Flags, set bit0 to 1 to enable this state
 					1,		// Arch context last flags
 					0,		// Residency counter frequency
 					2,		// Enabled parent state (Enables LLC)
@@ -482,12 +482,12 @@ Device (SYSM) {
 					ResourceTemplate(){Register(SystemMemory,0,0,0,0)},				  	  // Usage counter register
 					"KryoGold1.C3"													  // Name
 				},
-				// C4 
+				// C4 (PSCI 0x40000004; disabled: WFI-only idle for now)
 				Package ()
 				{
 					3950,	// Min residency (us)
 					910,	// Wake latency (us)
-					1,		// Flags, set bit0 to 1 to enable this state
+					0,		// Flags, set bit0 to 1 to enable this state
 					1,		// Arch context last flags
 					0,		// Residency counter frequency
 					2,		// Enabled parent state (Enables D4)   0x40000003
@@ -554,12 +554,12 @@ Device (SYSM) {
 					ResourceTemplate(){Register(SystemMemory,0,0,0,0)},				  	  // Usage counter register
 					"KryoGold2.C3"													  // Name
 				},
-				// C4 
+				// C4 (PSCI 0x40000004; disabled: WFI-only idle for now)
 				Package ()
 				{
 					3950,	// Min residency (us)
 					910,	// Wake latency (us)
-					1,		// Flags, set bit0 to 1 to enable this state
+					0,		// Flags, set bit0 to 1 to enable this state
 					1,		// Arch context last flags
 					0,		// Residency counter frequency
 					2,		// Enabled parent state (Enables D4)  0x40000004
@@ -626,12 +626,12 @@ Device (SYSM) {
 					ResourceTemplate(){Register(SystemMemory,0,0,0,0)},				  	  // Usage counter register
 					"KryoPrime0.C3"													  // Name
 				},
-				// C4 
+				// C4 (PSCI 0x40000004; disabled: WFI-only idle for now)
 				Package ()
 				{
 					4490,	// Min residency (us)
 					1500,	// Wake latency (us)
-					1,		// Flags, set bit0 to 1 to enable this state
+					0,		// Flags, set bit0 to 1 to enable this state
 					1,		// Arch context last flags
 					0,		// Residency counter frequency
 					2,		// Enabled parent state (Enables D4)  0x40000004

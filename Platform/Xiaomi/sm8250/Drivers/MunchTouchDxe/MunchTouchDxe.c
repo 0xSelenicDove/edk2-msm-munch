@@ -35,7 +35,11 @@
 #define GCC_WRAP0_S4_HALT     0x174CCU
 #define GCC_WRAP0_S4_RCG      0x174D0U
 
-#define QUP_VOTE_BITS         (BIT6 | BIT7 | BIT14)
+#define GCC_WRAP0_CORE_HALT   0x23000U
+#define GCC_WRAP0_CORE2X_HALT 0x23008U
+
+// bit6 m_ahb, bit7 s_ahb, bit8 core, bit9 core_2x, bit14 se4
+#define QUP_VOTE_BITS         (BIT6 | BIT7 | BIT8 | BIT9 | BIT14)
 
 // ---------------------------------------------------------------- pin controller
 #define TLMM_SOUTH            0x0F500000U
@@ -537,6 +541,20 @@ FtsReadReg (
 
 STATIC
 BOOLEAN
+QupClocksOn (
+  OUT UINT32  *M,
+  OUT UINT32  *S,
+  OUT UINT32  *C
+  )
+{
+  *M = MmioRead32 (GCC_BASE + GCC_WRAP0_M_AHB_HALT);
+  *S = MmioRead32 (GCC_BASE + GCC_WRAP0_S_AHB_HALT);
+  *C = MmioRead32 (GCC_BASE + GCC_WRAP0_S4_HALT);
+  return (((*M | *S | *C) & BIT31) == 0);
+}
+
+STATIC
+BOOLEAN
 EnableQupClocks (
   VOID
   )
@@ -549,20 +567,34 @@ EnableQupClocks (
   MmioWrite32 (GCC_BASE + GCC_QUP_VOTE_REG,
                MmioRead32 (GCC_BASE + GCC_QUP_VOTE_REG) | QUP_VOTE_BITS);
 
-  for (Retry = 0; Retry < 1000; Retry++) {
-    M = MmioRead32 (GCC_BASE + GCC_WRAP0_M_AHB_HALT);
-    S = MmioRead32 (GCC_BASE + GCC_WRAP0_S_AHB_HALT);
-    C = MmioRead32 (GCC_BASE + GCC_WRAP0_S4_HALT);
-    if (((M | S | C) & BIT31) == 0) {
-      Print (L"  QUP clocks on (m %08x s %08x se4 %08x, rcg cfg %08x)\r\n", M, S, C,
-             MmioRead32 (GCC_BASE + GCC_WRAP0_S4_RCG + 4));
-      return TRUE;
+  for (Retry = 0; Retry < 5000; Retry++) {      // up to 50 ms
+    if (QupClocksOn (&M, &S, &C)) {
+      goto On;
+    }
+    MicroSecondDelay (10);
+  }
+
+  Print (L"  vote only: s_ahb still off (vote %08x m %08x s %08x se4 %08x core %08x 2x %08x)\r\n",
+         MmioRead32 (GCC_BASE + GCC_QUP_VOTE_REG), M, S, C,
+         MmioRead32 (GCC_BASE + GCC_WRAP0_CORE_HALT),
+         MmioRead32 (GCC_BASE + GCC_WRAP0_CORE2X_HALT));
+
+  // Fallback: enable the s_ahb branch directly through its own control register.
+  MmioOr32 (GCC_BASE + GCC_WRAP0_S_AHB_HALT, BIT0);
+  for (Retry = 0; Retry < 5000; Retry++) {
+    if (QupClocksOn (&M, &S, &C)) {
+      goto On;
     }
     MicroSecondDelay (10);
   }
 
   Print (L"  QUP clocks did NOT start (m %08x s %08x se4 %08x)\r\n", M, S, C);
   return FALSE;
+
+On:
+  Print (L"  QUP clocks on (m %08x s %08x se4 %08x, rcg cfg %08x)\r\n", M, S, C,
+         MmioRead32 (GCC_BASE + GCC_WRAP0_S4_RCG + 4));
+  return TRUE;
 }
 
 STATIC
@@ -587,7 +619,7 @@ MunchTouchReadyToBoot (
   Print (L"\r\nMunchTouch step 2\r\n");
 
   if (!EnableQupClocks ()) {
-    MicroSecondDelay (6000000);
+    MicroSecondDelay (20000000);
     return;
   }
 

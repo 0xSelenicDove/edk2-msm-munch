@@ -100,7 +100,7 @@
 #define PMIC_ARB_STATUS_DONE      BIT0
 #define PMIC_ARB_STATUS_ERROR     (BIT1 | BIT2 | BIT3)
 
-#define PM8150L_SID               4U         // "pm8150a_*" supplies in the device tree
+#define PM8150L_SID               5U         // pm8150l LDOs: APIDs map to SID 5 (SID 4 has none); owned by the RPMh EE
 #define LDO1_BASE                 0x4000U    // pm8150a_l1  (vcc_i2c, 1.8 V)
 #define LDO10_BASE                0x4900U    // pm8150a_l10 (vdd, 3.2 V)
 #define LDO_REG_TYPE              0x04U
@@ -217,44 +217,6 @@ FindApid (
   return RequireWriteOwner ? -1 : FirstMatch;
 }
 
-/**
-  Print what the PMIC arbiter knows: version, and every APID that maps to SID 4/5 (pm8150l).
-**/
-STATIC
-VOID
-DumpApids (
-  VOID
-  )
-{
-  UINT32 Count;
-  UINT32 I;
-  UINT32 Hist[8];
-  UINT32 Shown;
-
-  Count = MmioRead32 (PMIC_ARB_CORE_BASE + PMIC_ARB_FEATURES) & 0x7FFU;
-  Print (L"  spmi: ver %08x feat %08x\r\n", MmioRead32 (PMIC_ARB_CORE_BASE), MmioRead32 (PMIC_ARB_CORE_BASE + PMIC_ARB_FEATURES));
-  if ((Count == 0) || (Count > PMIC_ARB_MAX_APIDS)) {
-    Count = PMIC_ARB_MAX_APIDS;
-  }
-  SetMem (Hist, sizeof (Hist), 0);
-  Shown = 0;
-  for (I = 0; I < Count; I++) {
-    UINT32 Map  = MmioRead32 (PMIC_ARB_CORE_BASE + PMIC_ARB_APID_MAP_BASE + I * 4);
-    UINT32 Ppid = (Map >> 8) & 0xFFFU;
-    if (Map == 0) {
-      continue;
-    }
-    Hist[(Ppid >> 8) & 7]++;
-    if ((((Ppid >> 8) == 4) || ((Ppid >> 8) == 5)) && ((Ppid & 0xFF) >= 0x40) && ((Ppid & 0xFF) <= 0x4F) && (Shown < 12)) {
-      Print (L"  apid %u map %08x ppid %03x own %u\r\n", I, Map, Ppid,
-             MmioRead32 (PMIC_ARB_CONFIG_BASE + PMIC_ARB_APID_OWNER_BASE + I * 4) & 7U);
-      Shown++;
-    }
-  }
-  Print (L"  apids/sid: %u %u %u %u %u %u %u %u (of %u)\r\n", Hist[0], Hist[1], Hist[2], Hist[3],
-         Hist[4], Hist[5], Hist[6], Hist[7], Count);
-}
-
 STATIC
 EFI_STATUS
 WaitForSpmi (
@@ -303,33 +265,13 @@ SpmiRead (
   return EFI_SUCCESS;
 }
 
-STATIC
-EFI_STATUS
-SpmiWrite (
-  IN UINT16  Address,
-  IN UINT8   Value
-  )
-{
-  INT32  Apid;
-  UINTN  Channel;
-
-  Apid = FindApid ((UINT16)((PM8150L_SID << 8) | (Address >> 8)), TRUE);
-  if (Apid < 0) {
-    return EFI_ACCESS_DENIED;
-  }
-
-  Channel = PMIC_ARB_CHNLS_BASE + (0x10000U * (UINT32)Apid);
-  MmioWrite32 (Channel + PMIC_ARB_WDATA0, Value);
-  MmioWrite32 (Channel + PMIC_ARB_CMD, (PMIC_ARB_OP_EXT_WRITEL << 27) | ((Address & 0xFFU) << 4));
-  return WaitForSpmi (Channel + PMIC_ARB_STATUS);
-}
-
 /**
-  Print one LDO's identity/state and, if it is a real LDO that is switched off, turn it on.
+  Print one LDO's identity and state (read only; the LDOs are owned by RPMh, so the Apps EE
+  cannot write them over SPMI).
 **/
 STATIC
 VOID
-PowerLdo (
+ReadLdo (
   IN CONST CHAR16  *Name,
   IN UINT16        Base
   )
@@ -341,7 +283,6 @@ PowerLdo (
   UINT8       Ub;
   UINT8       En;
   EFI_STATUS  Status;
-  BOOLEAN     WasOn;
 
   Type = Sub = Stat = Lb = Ub = En = 0xEE;
   Status  = SpmiRead (Base + LDO_REG_TYPE, &Type);
@@ -351,24 +292,8 @@ PowerLdo (
   Status |= SpmiRead (Base + LDO_REG_VSET_UB, &Ub);
   Status |= SpmiRead (Base + LDO_REG_ENABLE, &En);
 
-  if (EFI_ERROR (Status) || (Type != LDO_TYPE)) {
-    Print (L"  %s @%04x: type %02x sub %02x (not a readable LDO, skipped) %r\r\n",
-           Name, Base, Type, Sub, Status);
-    return;
-  }
-
-  WasOn = (En & LDO_ENABLE_BIT) != 0;
-  Print (L"  %s @%04x: sub %02x st %02x vset %02x%02x en %02x (%s)\r\n",
-         Name, Base, Sub, Stat, Ub, Lb, En, WasOn ? L"already on" : L"off");
-
-  if (!WasOn) {
-    Status = SpmiWrite (Base + LDO_REG_ENABLE, (UINT8)(En | LDO_ENABLE_BIT));
-    MicroSecondDelay (3000);
-    En = Stat = 0xEE;
-    SpmiRead (Base + LDO_REG_ENABLE, &En);
-    SpmiRead (Base + LDO_REG_STATUS1, &Stat);
-    Print (L"    enable write %r -> en %02x st %02x\r\n", Status, En, Stat);
-  }
+  Print (L"  %s @%04x: type %02x sub %02x st %02x vset %02x%02x en %02x %r\r\n",
+         Name, Base, Type, Sub, Stat, Ub, Lb, En, Status);
 }
 
 //
@@ -846,6 +771,32 @@ BcmVote (
   return RpmhSend (Addr, BIT30 | BIT29 | ((Vote & 0x3FFFU) << 14) | (Vote & 0x3FFFU));
 }
 
+/**
+  Switch an RPMh VRM regulator on (active set): voltage in mV at +0, enable at +4, as in the
+  downstream rpmh-regulator driver.
+**/
+STATIC
+EFI_STATUS
+VrmEnable (
+  IN CONST CHAR8  *Name,
+  IN UINT32       Millivolt
+  )
+{
+  UINT32      Addr;
+  EFI_STATUS  Status;
+
+  Addr = CmdDbFind (Name, NULL);
+  Print (L"  vrm %a @%05x -> %u mV\r\n", Name, Addr, Millivolt);
+  if (Addr == 0) {
+    return EFI_NOT_FOUND;
+  }
+  Status = RpmhSend (Addr + 0, Millivolt);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+  return RpmhSend (Addr + 4, 1);
+}
+
 //
 // ---------------------------------------------------------------------------- main
 //
@@ -986,13 +937,18 @@ MunchTouchReadyToBoot (
   PinSetup (TLMM_SOUTH, TS_IRQ_GPIO, PIN_CTL (0, 3, 3, 0));
   MicroSecondDelay (5000);
 
-  DumpApids ();
-
-  // Rails: 1.8 V I/O first, then 3.2 V core (same order as the Linux driver).
-  PowerLdo (L"L1 ", LDO1_BASE);
+  // Rails: 1.8 V I/O first, then 3.2 V core (same order as the Linux driver), through RPMh.
+  if (!RscInit ()) {
+    Print (L"  RSC not usable: cannot power the touch chip\r\n");
+    MicroSecondDelay (15000000);
+    return;
+  }
+  VrmEnable ("ldoc1", 1800);
   MicroSecondDelay (2000);
-  PowerLdo (L"L10", LDO10_BASE);
-  MicroSecondDelay (5000);
+  VrmEnable ("ldoc10", 3200);
+  MicroSecondDelay (10000);
+  ReadLdo (L"L1 ", LDO1_BASE);
+  ReadLdo (L"L10", LDO10_BASE);
 
   // Release reset and give the chip time to boot.
   PinOutput (TLMM_SOUTH, TS_RESET_GPIO, TRUE);

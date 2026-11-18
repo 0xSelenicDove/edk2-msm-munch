@@ -90,3 +90,9 @@ USB host now works in Windows (mouse verified). Summary of what mattered:
 - Firmware `MunchUsbDxe`: enable `mock_utmi_clk` (GCC 0xF01C), QSCRATCH `GENERAL_CFG` UTMI-as-PIPE select, stop device controller, `GCTL.PRTCAPDIR = host`. xHCI then reads `HCIVERSION 0x0110`. GCC (0x100000) had to be added to the UEFI memory map.
 - Windows: `USB0` as `PNP0D10` with inbox usbxhci. Tried and rejected: `QCOM25A6` + qcxhcifilter8250 (CLOCK_WATCHDOG), with or without the extra wake interrupts and the IORT; URS/Type-C path (needs PEP); real PEP0 (qcpep fails add).
 - The earlier hangs were the controller still being in device mode, then the Qualcomm filter driver.
+
+## USB mouse reliability (2026-11-18)
+First builds had a flaky mouse: sometimes not detected after boot, needing replugs. Cause: `USB0` declared `_S0W = 3` (can wake from D3 while the system runs), so Windows idled the xHCI into D3, but the wake interrupts a sleeping controller needs (HS-PHY DP/DM wake, pwr_event) are not wired in `_CRS`. Fix: `_S0W = 0` (D0 only). Verified: the mouse stays connected and works after replugging.
+
+## Shutdown BSOD (open)
+Shutting down Windows ends in `INTERNAL_POWER_ERROR` (0xA0). One earlier log entry had parameters `0xBEEF, 0x8003, 0xC4000001` (PSCI CPU_SUSPEND), `0xFFFFFFFE` (INVALID_PARAMETERS), but disabling idle states C3, then C3+C4 (WFI-only) did not remove the BSOD, so the cause is not simply those idle states. `DisplayParameters = 1` is set in the registry; the four numbers appear at the top-left of the blue screen. The file system stays clean afterwards (the BSOD happens at the final power-off).

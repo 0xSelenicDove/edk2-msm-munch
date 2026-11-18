@@ -10,6 +10,8 @@ Device (USB0)
     Name (_CCA, Zero)
     Name (_S0W, 0x03)
 
+    // Elimination test: only the register window and the main xHCI interrupt.
+    // (The earlier node also listed pwr_event, DP/DM and SS wake interrupts.)
     Name (_CRS, ResourceTemplate ()
     {
         Memory32Fixed (ReadWrite, 0x0A600000, 0x00100000)
@@ -17,22 +19,6 @@ Device (USB0)
         Interrupt (ResourceConsumer, Level, ActiveHigh, Shared, ,, )
         {
             0x000000A5
-        }
-        Interrupt (ResourceConsumer, Level, ActiveHigh, SharedAndWake, ,, )
-        {
-            0x000000A2
-        }
-        Interrupt (ResourceConsumer, Level, ActiveHigh, SharedAndWake, ,, )
-        {
-            0x00000211
-        }
-        Interrupt (ResourceConsumer, Edge, ActiveHigh, SharedAndWake, ,, )
-        {
-            0x0000020F
-        }
-        Interrupt (ResourceConsumer, Edge, ActiveHigh, SharedAndWake, ,, )
-        {
-            0x0000020E
         }
     })
 

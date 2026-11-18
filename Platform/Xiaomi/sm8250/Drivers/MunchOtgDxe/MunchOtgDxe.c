@@ -330,8 +330,8 @@ MunchOtgReadyToBoot (
          mDiagApidCount, mDiagTypecApid, mDiagTypecOwner,
          mDiagUsbType, mDiagUsbSubtype,
          mDiagDcdcApid, mDiagDcdcOwner);
-  Print (L"Keep OTG attached. Diagnostic continues in 3 seconds.\r\n");
-  MicroSecondDelay (3000000);
+  // Keep the diagnostic readable but short; it runs before every boot entry.
+  MicroSecondDelay (300000);
 }
 
 EFI_STATUS

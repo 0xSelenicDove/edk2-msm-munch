@@ -29,56 +29,60 @@
 
 ## ✨ Features & Enhancements
 
-* **Dual-Boot Ready:** Integrates `BootShim.Dualboot` with native support for modern Header v3 (4096-byte page) Android GKI kernels.
-* **Native File System Drivers:** Embedded `NtfsDxe` (`ntfs_aa64.efi`), `FatPkg` (`EnhancedFatDxe`), `ExfatDxe`, and `Ext2Dxe` dispatched at early boot for instant partition mounting.
-* **Direct Windows ARM Loader:** Automated BDS detection for `\EFI\Microsoft\Boot\bootmgfw.efi` across GPT disk volumes.
-* **Clean Silicon Dispatch:** Neutralized Qualcomm closed-source binary assertion traps (`BaseDebugLibNull`) and disabled hardware watchdog resets for maximum stability.
-* **Native Resolution Display:** Pixel-perfect 1080 × 2400 display output with high-performance BLT rendering.
+* **Boots Windows 11 ARM64 to the desktop** with the A/B slot setup below.
+* **Boot menu with working buttons:** a small driver (`MunchButtonsDxe`) reads Volume Up/Down and Power straight from the PM8150, because Qualcomm's `PmicDxe`/`ButtonsDxe` do not work on munch.
+* **Android ⇄ Windows choice:** Windows starts by default; the UEFI Boot Manager has a *Reboot to other slot* entry that switches to Android.
+* **Native File System Drivers:** `NtfsDxe`, `FatPkg` (`EnhancedFatDxe`), `ExfatDxe`, `Ext2Dxe`.
+* **Direct Windows ARM Loader:** BDS detects `\EFI\Microsoft\Boot\bootmgfw.efi` on the mounted filesystems.
+* **USB-C OTG power:** `MunchOtgDxe` enables the PM8150B OTG boost (VBUS) before boot. USB *data* is not working yet, see status below.
+* **Fast status text:** 20 ms per line on the early framebuffer console.
 
 ---
 
-## 🎮 Physical Key Bindings
+## 🎮 Boot Menu & Buttons
 
-| Button | Key Event | Action in UEFI / Boot Manager |
-| :--- | :--- | :--- |
-| **Volume Up** | `SCAN_UP` | Enter **Boot Manager Menu / UEFI Settings** (or select item) |
-| **Volume Down** | `SCAN_DOWN` | Navigate menu down |
-| **Power Button** | `ENTER` | Confirm selection / Continue boot |
-| **USB-C Keyboard (OTG)** | `ESC` / `Win` | Enter UEFI Setup Menu |
+| Button | Action |
+| :--- | :--- |
+| **Volume Up** | Tap during the splash ("Press any side button for Boot Options", ~5 s) to open the UEFI front page |
+| **Volume Down** | Move the highlight down |
+| **Power** | Select |
+
+On the front page choose **Boot Manager**. Useful entries:
+
+* **Windows Boot Manager** – start Windows now.
+* **Reboot to other slot** – switch to Android (slot A) and reboot.
+
+If you do nothing, Windows starts after the splash.
 
 > [!NOTE]
-> The key mapping above is the intended design and has **not been verified on `munch`** (no `ButtonsDxe` is included). USB-C keyboard does not work until USB is brought up.
->
-> When the boot screen displays *"Press Windows key for UEFI settings"*, on the physical phone you simply press **Volume Up**.
+> Holding Volume Up during power-on is taken by the phone's own bootloader (recovery). Tap it *after* the splash text appears.
 
 ---
 
-## 🚀 Quick Start & Flashing Guide
+## 🚀 Install (A/B slot dual boot)
 
-### 1. Prerequisites
-* Unlocked bootloader on your Xiaomi POCO F4 / Redmi K40S (`munch`).
-* Storage partitioned into:
-  * **ESP Partition (`sda35`):** FAT32 (~500 MB) — Contains **only** `/EFI/` bootloader files.
-  * **Windows Partition (`sda36`):** NTFS (64 GB+) — Contains the full Windows 11 ARM64 OS.
-* Stock HyperOS / Android 13/14 rooted boot image (`boot_a.img`).
+The recommended layout keeps stock Android untouched in **slot A** and installs UEFI only in **slot B**:
 
----
-
-### 2. Automated Installation via Dual-Boot ZIP (Recommended)
-1. Download the latest `uefi-installer-munch.zip` from [Releases](https://github.com/0xSelenicDove/edk2-msm-munch/releases).
-2. Flash in Magisk / KernelSU / Recovery, or push via ADB shell:
+1. Phone has an unlocked bootloader, Magisk/root, and the Windows 11 ARM64 install on `sda36` (NTFS) + ESP on `sda35`.
+2. **Back up** `boot_a` first (`dd if=/dev/block/bootdevice/by-name/boot_a of=/sdcard/boot_a_stock.img`).
+3. Download `uefi-installer-munch.zip` from [Releases](https://github.com/0xSelenicDove/edk2-msm-munch/releases) and push it to the phone.
+4. As root, copy `boot_a` into `boot_b`, then run the installer against slot B:
    ```bash
-   mkdir -p /data/local/tmp/installer
-   unzip -o /data/local/tmp/uefi-installer.zip -d /data/local/tmp/installer
-   cd /data/local/tmp/installer
-   chmod -R 755 /data/local/tmp/installer
+   dd if=/dev/block/bootdevice/by-name/boot_a of=/dev/block/bootdevice/by-name/boot_b bs=1M
+   mkdir -p /data/local/tmp/installer && unzip -o /data/local/tmp/uefi-installer.zip -d /data/local/tmp/installer
+   cd /data/local/tmp/installer && chmod -R 755 .
+   sed -i 's/^slot=.*/slot=_b/' META-INF/com/google/android/update-binary
    sh META-INF/com/google/android/update-binary dummy 1 /data/local/tmp/uefi-installer.zip
    ```
-3. Reboot and **hold `Volume Up`** during power-on to launch Windows 11!
+5. Boot slot B: `fastboot set_active b && fastboot reboot`.
+6. Switch OS later with the menu (*Reboot to other slot*), or from a PC with `tools/munch-switch-os.sh windows|android`.
+
+> [!IMPORTANT]
+> Use the **installer ZIP**. The plain `boot-munch.img` is boot header v1 and the bootloader rejects it; stock `boot` is header v3.
 
 ---
 
-### 3. Optimal BCD Configuration
+### Optimal BCD Configuration
 For fast, clean, and error-free boot:
 ```cmd
 bcdedit /store BCD /set {bootmgr} device boot
@@ -105,31 +109,36 @@ bcdedit /store BCD /set {default} bootstatuspolicy IgnoreAllFailures
 ### 2. Error `0xc0e90002` (Code Integrity Failed)
 * **Fix:** Ensure `testsigning Yes` and `nointegritychecks Yes` are set in BCD, and offline driver packages in `DriverStore` have valid catalog associations.
 
-### 3. Memory Allocation on 12 GB RAM Models
-* **Fix:** The EDK2 memory descriptor uses the standard `"RAM Partition"` naming with continuous physical address ranges extending up to `0x300000000` (12 GB).
+### 3. `MEMORY_MANAGEMENT` BSOD / Windows freezes at the spinner
+* Use the build from `master` as-is. The memory map here keeps the layout that reaches the desktop.
+* Do **not** limit RAM or change the memory map without testing: a 4 GB-limited map and a hand-merged USB/menu build both froze at the spinner during bring-up.
 
 ---
 
 ## 📊 Current Status (Windows 11 ARM on POCO F4)
 
 > [!WARNING]
-> **Work in progress — boots, but not yet usable.** Windows 11 ARM64 reaches the desktop path, but there is **no touch input and no USB** (so no keyboard/mouse via OTG either). Earlier revisions of this table marked most hardware as working; that was inaccurate and has been corrected below.
+> **Work in progress.** Windows boots to the desktop and you can switch between Android and Windows at startup, but there is **no touch and no USB data**.
 
 | Component | Status | Details |
 | :--- | :--- | :--- |
-| **UEFI firmware / boot** | 🟢 **Working** | Boots, mounts ESP + NTFS, hands off to `bootmgfw.efi` |
+| **UEFI firmware / boot** | 🟢 **Working** | Boots, mounts ESP + NTFS, starts Windows |
+| **Windows desktop** | 🟢 **Working** | Reaches the desktop (display only) |
+| **Boot menu + buttons** | 🟢 **Working** | Volume Up/Down + Power via `MunchButtonsDxe`; Android ⇄ Windows via A/B slots |
 | **Display (GOP framebuffer)** | 🟢 **Working** | 1080 × 2400 framebuffer at `0x9c000000` |
-| **UFS Storage** | 🟢 **Working** | Exposed to Windows via `ufs.asl` |
-| **Touchscreen** | 🔴 **Not working** | No touch device in the ACPI DSDT (no I²C/SPI bus, GPIO or touch nodes) |
-| **USB-C (host / OTG / peripheral)** | 🔴 **Not working** | No USB controller in the DSDT, so Windows cannot enumerate it |
-| **Physical keys in UEFI** | ❓ **Unverified** | No `ButtonsDxe` is wired into `munch.fdf.inc` |
+| **UFS Storage** | 🟢 **Working** | `ufs.asl` |
+| **USB-C power (VBUS/OTG)** | 🟡 **Partial** | OTG light turns on (firmware `MunchOtgDxe`) |
+| **USB-C data** | 🔴 **Not working** | Windows Type-C manager (`QCOM257D`) fails to start with `0xC000009E` |
+| **Touchscreen** | 🔴 **Not working** | FocalTech on SPI (QUP SE4, reset GPIO33, IRQ GPIO39); needs bus/GPIO/PEP ACPI nodes |
 | **GPU / Wi-Fi / Bluetooth / Audio / Battery / Cellular** | ⚪ **Not started** | Need ACPI nodes and drivers that are not present yet |
 
-### Why touch and USB don't work
-The `munch` port was created by copying the **Poco F3 (`alioth`)** files:
-`FdtBlob_compat/munch.dtb` and `AcpiTables/munch/DSDT.aml` are byte-identical to the `alioth` ones, and the DSDT only declares UFS and PEP/LPI. Windows only sees devices the DSDT describes, so nothing else exists for it to load drivers on.
+### Why touch and USB data don't work
+* Windows only sees devices the DSDT describes, and the Windows power controller (`PEP0`) is faked as a generic `PNP0D80`. A real Qualcomm `QCOM2519` node needs full SM8250 clock/power tables that this repo does not have.
+* The USB Type-C port manager driver (`qcusbctcpm`, `ACPI\QCOM257D`) therefore fails to start with `0xC000009E` (device power failure), so the USB role switch never starts. VBUS power works only because the firmware (`MunchOtgDxe`) turns it on.
+* Touch is a FocalTech chip on SPI with GPIO interrupt/reset; the Qualcomm bus/GPIO drivers have the same `PEP0` dependency.
+* Qualcomm's closed `PmicDxe` (taken from a different product) asserts and bootloops on munch, so it stays disabled; keys are read directly by `MunchButtonsDxe` instead.
 
-See [docs/touch-usb-investigation.md](docs/touch-usb-investigation.md) for the detailed analysis and the plan for bringing up USB and touch.
+See [docs/touch-usb-investigation.md](docs/touch-usb-investigation.md) for the investigation notes.
 
 ---
 

@@ -17,6 +17,7 @@ DefinitionBlock("DSDT.AML", "DSDT", 0x02, "QCOMM ", "SDM850 ", 3)
         Include("pep_vars.asl")
         Include("pmic_typec.asl")
         Include("pep.asl")
+        Include("pep_ext.asl")
 
 		//
         // Buttons

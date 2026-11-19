@@ -1,0 +1,35 @@
+[Defines]
+  INF_VERSION                    = 0x0001001B
+  BASE_NAME                      = MunchClockDxe
+  FILE_GUID                      = 8B3E6F21-4C7A-4D95-A0E8-5F12C9B7D346
+  MODULE_TYPE                    = DXE_DRIVER
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = MunchClockDxeEntryPoint
+
+[Sources]
+  MunchClockDxe.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+
+[LibraryClasses]
+  BaseLib
+  BaseMemoryLib
+  DebugLib
+  IoLib
+  MemoryAllocationLib
+  TimerLib
+  UefiBootServicesTableLib
+  UefiDriverEntryPoint
+  UefiLib
+  UefiRuntimeServicesTableLib
+
+[Protocols]
+  gEfiSimpleFileSystemProtocolGuid
+
+[Guids]
+  gEfiEventReadyToBootGuid
+  gEfiFileInfoGuid
+
+[Depex]
+  TRUE

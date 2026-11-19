@@ -127,12 +127,12 @@ EVT_VHF_ASYNC_OPERATION EvtVhfGetFeature;
     0x05, 0x01,             /*   Generic Desktop */ \
     0x09, 0x30,             /*   X */ \
     0x75, 0x10, 0x95, 0x01, \
-    0x15, 0x00, 0x26, 0x30, 0x2A,           /* 0..10800 */ \
+    0x15, 0x00, 0x26, 0xBF, 0x21,           /* 0..8639 (1080 px * 8) */ \
     0x35, 0x00, 0x46, 0xB7, 0x02,           /* physical 0..695 (0.1 mm) */ \
     0x65, 0x11, 0x55, 0xFE, \
     0x81, 0x02, \
     0x09, 0x31,             /*   Y */ \
-    0x26, 0xC0, 0x5D,                       /* 0..24000 */ \
+    0x26, 0xFF, 0x4A,                       /* 0..19199 (2400 px * 8) */ \
     0x46, 0x0A, 0x06,                       /* physical 0..1546 */ \
     0x81, 0x02, \
     0x05, 0x0D,             /*   back to Digitizer */ \
@@ -368,6 +368,7 @@ static VOID PollOnce(PDEVICE_CONTEXT C)
     NTSTATUS Status;
     ULONG I, Count = 0, PointNum;
     BOOLEAN Touching;
+    BOOLEAN Idle;
 
     if (!C->Ready) {
         return;
@@ -384,17 +385,14 @@ static VOID PollOnce(PDEVICE_CONTEXT C)
     B[0] = FTS_REG_TOUCH;
     RtlCopyMemory(&B[1], Data, FTS_DATA_LEN);
     PointNum = B[2] & 0x0F;
-    if (PointNum == 0x0F && B[3] == 0xFF && B[4] == 0xFF && B[5] == 0xFF && B[6] == 0xFF) {
-        C->Failures++;                          // chip in recovery state: nothing valid
-        return;
-    }
-    if (PointNum > FTS_MAX_POINTS) {
+    Idle = (PointNum == 0x0F && B[3] == 0xFF && B[4] == 0xFF && B[5] == 0xFF && B[6] == 0xFF);
+    if (!Idle && PointNum > FTS_MAX_POINTS) {
         return;
     }
 
     RtlZeroMemory(&Rep, sizeof(Rep));
     Rep.ReportId = 1;
-    for (I = 0; I < FTS_MAX_POINTS; I++) {
+    for (I = 0; I < FTS_MAX_POINTS && !Idle; I++) {
         ULONG Base = 6 * I;
         UCHAR Id = B[5 + Base] >> 4;
         UCHAR Flag = B[3 + Base] >> 6;          // 0 down, 1 up, 2 contact
@@ -409,8 +407,8 @@ static VOID PollOnce(PDEVICE_CONTEXT C)
         if (X > C->MaxX) { C->MaxX = X; C->ExtDirty = TRUE; }
         if (Y < C->MinY) { C->MinY = Y; C->ExtDirty = TRUE; }
         if (Y > C->MaxY) { C->MaxY = Y; C->ExtDirty = TRUE; }
-        if (X > 10800) X = 10800;
-        if (Y > 24000) Y = 24000;
+        if (X > 8639) X = 8639;
+        if (Y > 19199) Y = 19199;
         Rep.Finger[Count].Flags = (Flag == 1) ? 0 : 3;
         Rep.Finger[Count].Id = Id;
         Rep.Finger[Count].X = (USHORT)X;

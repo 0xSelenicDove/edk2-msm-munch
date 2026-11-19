@@ -597,16 +597,11 @@ NTSTATUS EvtD0Entry(WDFDEVICE Device, WDF_POWER_DEVICE_STATE Prev)
     KdPrint(("munchfts: chip id %02x status %08x\n", Id1, Status));
     LogF("D0 entry: chip id %02x status %08x", Id1, Status);
     {
-        // Edge rejection experiment: log the level (vendor default 2, range 0..3), then try 0.
-        UCHAR Lvl = 0xEE, Ori = 0xEE, Lvl2 = 0xEE;
-        NTSTATUS S1, S2, S3;
-
-        S1 = FtsRead(C, 0x9C, 1, &Lvl);
-        S2 = FtsRead(C, 0x8C, 1, &Ori);
-        S3 = FtsWriteReg(C, 0x9C, 0);
-        FtsRead(C, 0x9C, 1, &Lvl2);
-        LogF("edge filter reg 0x9c was %02x (%08x), orientation 0x8c %02x (%08x), write 0 -> %08x, now %02x",
-             Lvl, S1, Ori, S2, S3, Lvl2);
+        // Log the edge filter level only (vendor default 2).  Writing 0 had no effect on the
+        // reachability of the top corners, so the chip default is left alone.
+        UCHAR Lvl = 0xEE;
+        NTSTATUS S1 = FtsRead(C, 0x9C, 1, &Lvl);
+        LogF("edge filter reg 0x9c = %02x (%08x)", Lvl, S1);
     }
 
     Status = VhfStart(C->Vhf);

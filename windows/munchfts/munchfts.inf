@@ -32,6 +32,13 @@ CopyFiles = MunchFts_Files
 [MunchFts_Files]
 munchfts.sys
 
+[MunchFts_Device.NT.HW]
+AddReg = MunchFts_AddReg
+
+[MunchFts_AddReg]
+; The Virtual HID Framework attaches as a lower filter; without it VhfCreate fails (0xC00000BB).
+HKR,,"LowerFilters",0x00010000,"vhf"
+
 [MunchFts_Device.NT.Services]
 AddService = munchfts, 0x00000002, MunchFts_Service
 

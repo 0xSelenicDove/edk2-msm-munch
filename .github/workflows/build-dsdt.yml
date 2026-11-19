@@ -2,6 +2,11 @@ name: Build munch DSDT.aml
 
 on:
   workflow_dispatch:
+  push:
+    branches: [feat/munch-touch]
+    paths:
+      - "Platform/Xiaomi/sm8250/AcpiTables/munch/**"
+      - ".github/workflows/build-dsdt.yml"
 
 jobs:
   dsdt:

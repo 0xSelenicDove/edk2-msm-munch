@@ -84,7 +84,8 @@ typedef struct _DEVICE_CONTEXT {
     PUCHAR      Gpio;
     ULONG       TxDepth;
     VHFHANDLE   Vhf;
-    WDFTIMER    Timer;
+    PKTHREAD    Thread;
+    volatile BOOLEAN Stop;
     BOOLEAN     Ready;
     BOOLEAN     WasTouching;
     ULONG       Failures;
@@ -102,7 +103,6 @@ EVT_WDF_DEVICE_PREPARE_HARDWARE EvtPrepareHardware;
 EVT_WDF_DEVICE_RELEASE_HARDWARE EvtReleaseHardware;
 EVT_WDF_DEVICE_D0_ENTRY EvtD0Entry;
 EVT_WDF_DEVICE_D0_EXIT EvtD0Exit;
-EVT_WDF_TIMER EvtPoll;
 EVT_VHF_ASYNC_OPERATION EvtVhfGetFeature;
 
 // ---------------------------------------------------------------- HID report descriptor
@@ -425,6 +425,9 @@ static VOID PollOnce(PDEVICE_CONTEXT C)
     }
     C->WasTouching = Touching;
     C->Frames++;
+    if (C->Frames <= 30) {
+        LogF("frame %lu count %lu id %u x %u y %u flags %u", C->Frames, Count, Rep.Finger[0].Id, Rep.Finger[0].X, Rep.Finger[0].Y, Rep.Finger[0].Flags);
+    }
 
     Pkt.reportBuffer = (PUCHAR)&Rep;
     Pkt.reportBufferLen = sizeof(Rep);
@@ -432,22 +435,31 @@ static VOID PollOnce(PDEVICE_CONTEXT C)
     VhfReadReportSubmit(C->Vhf, &Pkt);
 }
 
-VOID EvtPoll(WDFTIMER Timer)
+static VOID PollThread(PVOID Ctx)
 {
-    PDEVICE_CONTEXT C = GetContext(WdfTimerGetParentObject(Timer));
+    PDEVICE_CONTEXT C = (PDEVICE_CONTEXT)Ctx;
+    LARGE_INTEGER Delay;
 
-    PollOnce(C);
-    C->Polls++;
-    if (C->Polls <= 4 || (C->Polls < 8000 && (C->Polls % 250) == 0) || (C->Polls % 5000) == 0) {
-        LogF("poll %lu frames %lu fail %lu last %08x gpio39 %lu data %02x %02x %02x %02x %02x %02x %02x %02x",
-             C->Polls, C->Frames, C->Failures, C->LastStatus,
-             C->Gpio ? (READ_REGISTER_ULONG((PULONG)(C->Gpio + 4)) & 1) : 9UL,
-             C->LastData[0], C->LastData[1], C->LastData[2], C->LastData[3],
-             C->LastData[4], C->LastData[5], C->LastData[6], C->LastData[7]);
+    Delay.QuadPart = -10000LL * POLL_MS;
+    ExSetTimerResolution(10000, TRUE);                // 1 ms timer resolution
+    LogF("poll thread started");
+
+    while (!C->Stop) {
+        PollOnce(C);
+        C->Polls++;
+        if (C->Polls <= 4 || (C->Polls < 8000 && (C->Polls % 250) == 0) || (C->Polls % 5000) == 0) {
+            LogF("poll %lu frames %lu fail %lu last %08x gpio39 %lu data %02x %02x %02x %02x %02x %02x %02x %02x",
+                 C->Polls, C->Frames, C->Failures, C->LastStatus,
+                 C->Gpio ? (READ_REGISTER_ULONG((PULONG)(C->Gpio + 4)) & 1) : 9UL,
+                 C->LastData[0], C->LastData[1], C->LastData[2], C->LastData[3],
+                 C->LastData[4], C->LastData[5], C->LastData[6], C->LastData[7]);
+        }
+        KeDelayExecutionThread(KernelMode, FALSE, &Delay);
     }
-    if (C->Ready) {
-        WdfTimerStart(Timer, WDF_REL_TIMEOUT_IN_MS(POLL_MS));
-    }
+
+    ExSetTimerResolution(0, FALSE);
+    LogF("poll thread stopped");
+    PsTerminateSystemThread(STATUS_SUCCESS);
 }
 
 // ---------------------------------------------------------------- VHF feature report
@@ -540,7 +552,17 @@ NTSTATUS EvtD0Entry(WDFDEVICE Device, WDF_POWER_DEVICE_STATE Prev)
         return Status;
     }
     C->Ready = TRUE;
-    WdfTimerStart(C->Timer, WDF_REL_TIMEOUT_IN_MS(POLL_MS));
+    C->Stop = FALSE;
+    {
+        HANDLE H;
+        Status = PsCreateSystemThread(&H, THREAD_ALL_ACCESS, NULL, NULL, NULL, PollThread, C);
+        LogF("PsCreateSystemThread %08x", Status);
+        if (!NT_SUCCESS(Status)) {
+            return Status;
+        }
+        ObReferenceObjectByHandle(H, THREAD_ALL_ACCESS, NULL, KernelMode, (PVOID *)&C->Thread, NULL);
+        ZwClose(H);
+    }
     return STATUS_SUCCESS;
 }
 
@@ -550,7 +572,12 @@ NTSTATUS EvtD0Exit(WDFDEVICE Device, WDF_POWER_DEVICE_STATE Target)
 
     UNREFERENCED_PARAMETER(Target);
     C->Ready = FALSE;
-    WdfTimerStop(C->Timer, TRUE);
+    C->Stop = TRUE;
+    if (C->Thread != NULL) {
+        KeWaitForSingleObject(C->Thread, Executive, KernelMode, FALSE, NULL);
+        ObDereferenceObject(C->Thread);
+        C->Thread = NULL;
+    }
     return STATUS_SUCCESS;
 }
 
@@ -558,7 +585,6 @@ NTSTATUS EvtDeviceAdd(WDFDRIVER Driver, PWDFDEVICE_INIT Init)
 {
     WDF_PNPPOWER_EVENT_CALLBACKS Pnp;
     WDF_OBJECT_ATTRIBUTES Attr;
-    WDF_TIMER_CONFIG TimerCfg;
     VHF_CONFIG Vhf;
     WDFDEVICE Device;
     PDEVICE_CONTEXT C;
@@ -580,15 +606,6 @@ NTSTATUS EvtDeviceAdd(WDFDRIVER Driver, PWDFDEVICE_INIT Init)
         return Status;
     }
     C = GetContext(Device);
-
-    WDF_TIMER_CONFIG_INIT(&TimerCfg, EvtPoll);
-    TimerCfg.UseHighResolutionTimer = WdfTrue;
-    WDF_OBJECT_ATTRIBUTES_INIT(&Attr);
-    Attr.ParentObject = Device;
-    Status = WdfTimerCreate(&TimerCfg, &Attr, &C->Timer);
-    if (!NT_SUCCESS(Status)) {
-        return Status;
-    }
 
     VHF_CONFIG_INIT(&Vhf, WdfDeviceWdmGetDeviceObject(Device), sizeof(gReportDescriptor), (PUCHAR)gReportDescriptor);
     Vhf.VendorID = 0x2808;                      // FocalTech

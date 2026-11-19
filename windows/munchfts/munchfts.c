@@ -378,6 +378,25 @@ static ULONG MapAxis(ULONG V, ULONG Lo, ULONG Hi, ULONG Max, ULONG Zone)
     return V;
 }
 
+// Write one FTS register (vendor layout: reg, 0x00, len hi, len lo, 3 dummy bytes, value; no CRC).
+static NTSTATUS FtsWriteReg(PDEVICE_CONTEXT C, UCHAR Reg, UCHAR Value)
+{
+    UCHAR Tx[8];
+    UCHAR Rx[8];
+    NTSTATUS Status;
+
+    RtlZeroMemory(Tx, sizeof(Tx));
+    RtlZeroMemory(Rx, sizeof(Rx));
+    Tx[0] = Reg;
+    Tx[3] = 1;
+    Tx[7] = Value;
+    Status = GeniXfer(C, Tx, Rx, sizeof(Tx));
+    if (NT_SUCCESS(Status) && (Rx[3] & 0xA0) != 0) {
+        Status = STATUS_DEVICE_NOT_READY;
+    }
+    return Status;
+}
+
 // ---------------------------------------------------------------- touch decode
 static VOID PollOnce(PDEVICE_CONTEXT C)
 {
@@ -577,6 +596,18 @@ NTSTATUS EvtD0Entry(WDFDEVICE Device, WDF_POWER_DEVICE_STATE Prev)
     Status = FtsRead(C, FTS_REG_CHIP_ID, 1, &Id1);
     KdPrint(("munchfts: chip id %02x status %08x\n", Id1, Status));
     LogF("D0 entry: chip id %02x status %08x", Id1, Status);
+    {
+        // Edge rejection experiment: log the level (vendor default 2, range 0..3), then try 0.
+        UCHAR Lvl = 0xEE, Ori = 0xEE, Lvl2 = 0xEE;
+        NTSTATUS S1, S2, S3;
+
+        S1 = FtsRead(C, 0x9C, 1, &Lvl);
+        S2 = FtsRead(C, 0x8C, 1, &Ori);
+        S3 = FtsWriteReg(C, 0x9C, 0);
+        FtsRead(C, 0x9C, 1, &Lvl2);
+        LogF("edge filter reg 0x9c was %02x (%08x), orientation 0x8c %02x (%08x), write 0 -> %08x, now %02x",
+             Lvl, S1, Ori, S2, S3, Lvl2);
+    }
 
     Status = VhfStart(C->Vhf);
     LogF("VhfStart %08x", Status);

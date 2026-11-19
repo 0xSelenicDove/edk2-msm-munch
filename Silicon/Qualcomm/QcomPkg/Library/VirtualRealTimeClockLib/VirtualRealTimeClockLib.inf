@@ -37,6 +37,7 @@
   DebugLib
   TimerLib
   BaseLib
+  BaseMemoryLib
   PcdLib
 
 [FixedPcd]

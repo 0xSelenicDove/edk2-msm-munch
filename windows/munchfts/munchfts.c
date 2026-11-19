@@ -93,6 +93,8 @@ typedef struct _DEVICE_CONTEXT {
     ULONG       Polls;
     NTSTATUS    LastStatus;
     UCHAR       LastData[16];
+    ULONG       MinX, MaxX, MinY, MaxY;
+    BOOLEAN     ExtDirty;
 } DEVICE_CONTEXT, *PDEVICE_CONTEXT;
 
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(DEVICE_CONTEXT, GetContext)
@@ -403,6 +405,10 @@ static VOID PollOnce(PDEVICE_CONTEXT C)
         }
         X = ((B[3 + Base] & 0x0F) << 11) + ((B[4 + Base] & 0xFF) << 3) + ((B[7 + Base] & 0xE0) >> 5);
         Y = ((B[5 + Base] & 0x0F) << 11) + ((B[6 + Base] & 0xFF) << 3) + ((B[7 + Base] & 0x1C) >> 2);
+        if (X < C->MinX) { C->MinX = X; C->ExtDirty = TRUE; }
+        if (X > C->MaxX) { C->MaxX = X; C->ExtDirty = TRUE; }
+        if (Y < C->MinY) { C->MinY = Y; C->ExtDirty = TRUE; }
+        if (Y > C->MaxY) { C->MaxY = Y; C->ExtDirty = TRUE; }
         if (X > 10800) X = 10800;
         if (Y > 24000) Y = 24000;
         Rep.Finger[Count].Flags = (Flag == 1) ? 0 : 3;
@@ -443,6 +449,8 @@ static VOID PollThread(PVOID Ctx)
     Delay.QuadPart = -10000LL * POLL_MS;
     ExSetTimerResolution(10000, TRUE);                // 1 ms timer resolution
     LogF("poll thread started");
+    C->MinX = C->MinY = 0xFFFFFFFF;
+    C->MaxX = C->MaxY = 0;
 
     while (!C->Stop) {
         PollOnce(C);
@@ -453,6 +461,10 @@ static VOID PollThread(PVOID Ctx)
                  C->Gpio ? (READ_REGISTER_ULONG((PULONG)(C->Gpio + 4)) & 1) : 9UL,
                  C->LastData[0], C->LastData[1], C->LastData[2], C->LastData[3],
                  C->LastData[4], C->LastData[5], C->LastData[6], C->LastData[7]);
+        }
+        if (C->ExtDirty && (C->Polls % 60) == 0) {
+            C->ExtDirty = FALSE;
+            LogF("extent x %lu..%lu y %lu..%lu", C->MinX, C->MaxX, C->MinY, C->MaxY);
         }
         KeDelayExecutionThread(KernelMode, FALSE, &Delay);
     }

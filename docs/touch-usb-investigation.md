@@ -133,3 +133,18 @@ Proposed design (not started):
 1. **Firmware** (`MunchTouchDxe`): keep the bring-up, drop the on-screen text and the 20 s hold (quiet mode), keep the RPMh VRM votes. Add an ACPI device `MFTS0001` to the munch DSDT with two memory resources: SE4 (`0x990000`, `0x4000`) and the south TLMM page holding GPIO 39 (`0x0F527000`, `0x1000`, level in the `io` register at +4).
 2. **Windows driver** (KMDF, `munchfts.sys`): map the two resources, poll GPIO 39 every ~8 ms (a GPIO interrupt would need the Qualcomm GPIO driver), do the GENI full-duplex transfer (opcode 3) with FIFO refill, CRC-check, decode, and report through VHF (Virtual HID Framework) as a 10-point HID touch digitizer. Build with the WDK on a GitHub Actions Windows runner (ARM64), test-sign, and install with `pnputil` (needs a way to run commands on the phone: the earlier Startup-folder script, or USB Ethernet + RDP now that USB host works).
 3. Risks: Windows power management without a real PEP (the device stays in D0, fine), the rails/clock votes surviving Windows sleep (untested), and the first driver install needing a working input path (the USB mouse works).
+
+## Windows touch works (2026-11-19)
+
+Touch input works in Windows on the munch with `munchfts.sys` (branch `feat/munch-touch`, not merged). Pieces:
+
+* **Firmware** `MunchTouchDxe` (quiet mode, `MUNCH_TOUCH_VERBOSE` = FALSE): clocks, pins, RPMh rails, reset, SE4 init; prints one line (`MunchTouch: chip ID 56 52`) and holds 1 s.
+* **ACPI** `AcpiTables/munch/touch_fts.asl`: device `MFTS0001` with memory resources SE4 (`0x990000`, `0x4000`) and the south TLMM GPIO 39 page (`0xF527000`, `0x1000`). **`DSDT.aml` is a committed file**: CI does not recompile it, so after editing any `.asl` run the `build-dsdt.yml` workflow and commit the resulting `DSDT.aml`, otherwise the device is missing in Windows (this cost one test cycle).
+* **Driver** `windows/munchfts/` (KMDF + VHF): maps the two resources, re-initialises GENI SPI (same sequence as the firmware, full-duplex opcode 3), polls the FTS touch register `0x01` from a system thread every 8 ms (1 ms timer resolution), decodes up to 10 contacts and submits HID reports through VHF. Log: `C:\Windows\Temp\munchfts.log`.
+* **Lessons from bring-up**:
+  * VHF in a KMDF driver needs `HKR,,"LowerFilters",0x00010000,"vhf"` in the INF `.HW` section; without it `VhfCreate` returns `STATUS_NOT_SUPPORTED` (`0xC00000BB`).
+  * A WDF high-resolution timer callback did not give usable logging at PASSIVE_LEVEL; a system thread with `KeDelayExecutionThread` works.
+  * Updating the driver while the device is running leaves it in `CM_PROB_NEED_RESTART`; the new version only loads after a reboot.
+  * Windows 11 24H2 (build 26100) ARM64, test signing on. CI (`build-munchfts.yml`, windows-2022 + NuGet WDK 10.0.26100.6584) builds, test-signs and makes the catalog (`munchfts-test.cer` must be added to the Root and TrustedPublisher stores).
+  * Install without a shell on the phone: from Android, `fsck.ntfs -d` then `mount.ntfs -o rw` on the Windows partition (`/dev/block/sda36`, dirty after every forced restart), copy the package to `C:\munchfts` plus a Startup script (`...\Users\<user>\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\munchfts-startup.cmd`) that re-launches `install.cmd` elevated (UAC prompt, click Yes with the mouse) unless `C:\munchfts\done.txt` exists. Remove `done.txt` to re-run it.
+* Open points: the system thread polls forever at 125 Hz (no D-state or sleep handling, no interrupt), rails/clocks and Windows sleep are untested, the on-screen firmware line and test-cert install are test-grade, and none of this is merged to master.

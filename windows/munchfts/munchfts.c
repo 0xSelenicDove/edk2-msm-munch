@@ -358,6 +358,26 @@ static VOID LogF(const char *Fmt, ...)
     ZwClose(H);
 }
 
+// The chip (or the finger, case lip, edge rejection) never reports the outermost strip of the
+// panel: the smallest/largest raw values seen were X 83..8288 and Y 195..19113 (range 8639 x 19199).
+// Stretch only the edge zones so the whole screen is reachable and leave the middle untouched.
+static ULONG MapAxis(ULONG V, ULONG Lo, ULONG Hi, ULONG Max, ULONG Zone)
+{
+    if (V <= Lo) {
+        return 0;
+    }
+    if (V < Zone) {
+        return (V - Lo) * Zone / (Zone - Lo);
+    }
+    if (V >= Hi) {
+        return Max;
+    }
+    if (V > Max - Zone) {
+        return (Max - Zone) + (V - (Max - Zone)) * Zone / (Hi - (Max - Zone));
+    }
+    return V;
+}
+
 // ---------------------------------------------------------------- touch decode
 static VOID PollOnce(PDEVICE_CONTEXT C)
 {
@@ -409,6 +429,8 @@ static VOID PollOnce(PDEVICE_CONTEXT C)
         if (Y > C->MaxY) { C->MaxY = Y; C->ExtDirty = TRUE; }
         if (X > 8639) X = 8639;
         if (Y > 19199) Y = 19199;
+        X = MapAxis(X, 60, 8320, 8639, 800);
+        Y = MapAxis(Y, 150, 19140, 19199, 1600);
         Rep.Finger[Count].Flags = (Flag == 1) ? 0 : 3;
         Rep.Finger[Count].Id = Id;
         Rep.Finger[Count].X = (USHORT)X;

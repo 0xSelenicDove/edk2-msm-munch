@@ -17,6 +17,7 @@
   BaseMemoryLib
   DebugLib
   IoLib
+  PrintLib
   TimerLib
   UefiBootServicesTableLib
   UefiDriverEntryPoint

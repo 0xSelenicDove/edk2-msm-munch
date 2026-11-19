@@ -1,0 +1,48 @@
+name: Build munchfts (Windows touch driver)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore WDK / SDK NuGet packages
+        working-directory: windows/munchfts
+        run: nuget restore .\packages.config -PackagesDirectory .\packages\
+
+      - name: Build munchfts.sys (ARM64)
+        working-directory: windows/munchfts
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          msbuild munchfts.vcxproj /p:Configuration=Release /p:Platform=ARM64 /v:m /m /nologo
+
+      - name: Collect, test-sign and package
+        working-directory: windows/munchfts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          $sys = Get-ChildItem -Recurse -Filter munchfts.sys | Select-Object -First 1
+          Copy-Item $sys.FullName out\munchfts.sys
+          Copy-Item munchfts.inf out\munchfts.inf
+          $inf2cat = Get-ChildItem -Recurse -Path packages -Filter Inf2Cat.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $inf2cat) { $inf2cat = Get-ChildItem -Recurse -Path "C:\Program Files (x86)\Windows Kits\10" -Filter Inf2Cat.exe -ErrorAction SilentlyContinue | Select-Object -First 1 }
+          Write-Host "inf2cat: $($inf2cat.FullName)"
+          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=munchfts test" -CertStoreLocation Cert:\CurrentUser\My -NotAfter (Get-Date).AddYears(10)
+          Export-Certificate -Cert $cert -FilePath out\munchfts-test.cer | Out-Null
+          Set-AuthenticodeSignature -FilePath out\munchfts.sys -Certificate $cert -HashAlgorithm SHA256 | Out-Null
+          if ($inf2cat) {
+            & $inf2cat.FullName /driver:out /os:10_NI_ARM64,10_GE_ARM64 /uselocaltime
+            if (Test-Path out\munchfts.cat) {
+              Set-AuthenticodeSignature -FilePath out\munchfts.cat -Certificate $cert -HashAlgorithm SHA256 | Out-Null
+            }
+          }
+          Get-ChildItem out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: munchfts-arm64
+          path: windows/munchfts/out/

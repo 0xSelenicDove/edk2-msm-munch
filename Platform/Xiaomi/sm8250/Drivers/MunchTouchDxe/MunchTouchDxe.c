@@ -29,6 +29,30 @@
 #include <Library/TimerLib.h>
 #include <Library/UefiBootServicesTableLib.h>
 #include <Library/UefiLib.h>
+#include <Library/PrintLib.h>
+#include <Protocol/SimpleTextOut.h>
+
+// Set to TRUE to get the full bring-up log on the early console (test builds).
+#define MUNCH_TOUCH_VERBOSE   FALSE
+
+STATIC
+VOID
+TPrint (
+  IN CONST CHAR16  *Format,
+  ...
+  )
+{
+  VA_LIST  Args;
+  CHAR16   Buffer[200];
+
+  if (!MUNCH_TOUCH_VERBOSE) {
+    return;
+  }
+  VA_START (Args, Format);
+  UnicodeVSPrint (Buffer, sizeof (Buffer), Format, Args);
+  VA_END (Args);
+  gST->ConOut->OutputString (gST->ConOut, Buffer);
+}
 
 // ---------------------------------------------------------------- clocks (GCC)
 #define GCC_BASE              0x00100000U
@@ -292,7 +316,7 @@ ReadLdo (
   Status |= SpmiRead (Base + LDO_REG_VSET_UB, &Ub);
   Status |= SpmiRead (Base + LDO_REG_ENABLE, &En);
 
-  Print (L"  %s @%04x: type %02x sub %02x st %02x vset %02x%02x en %02x %r\r\n",
+  TPrint (L"  %s @%04x: type %02x sub %02x st %02x vset %02x%02x en %02x %r\r\n",
          Name, Base, Type, Sub, Stat, Ub, Lb, En, Status);
 }
 
@@ -682,7 +706,7 @@ RscInit (
   Id    = MmioRead32 (RSC_DRV2_BASE + RSC_DRV_ID_REG);
   Major = (Id >> 16) & 0xFFU;
   if ((Major == 0) || (Major > 3)) {
-    Print (L"  RSC id unexpected, not touching it\r\n");
+    TPrint (L"  RSC id unexpected, not touching it\r\n");
     return FALSE;
   }
   mR  = (Major >= 3) ? &mRegs30 : &mRegs27;
@@ -696,11 +720,11 @@ RscInit (
     }
   }
   if (mTcs == 0xFFFFFFFFU) {
-    Print (L"  no free active TCS\r\n");
+    TPrint (L"  no free active TCS\r\n");
     return FALSE;
   }
   MmioWrite32 (RSC_DRV2_BASE + RSC_TCS_OFFSET + mR->IrqClear, BIT0 << mTcs);
-  Print (L"  rsc id %08x cfg %08x using tcs%u\r\n", Id, Cfg, mTcs);
+  TPrint (L"  rsc id %08x cfg %08x using tcs%u\r\n", Id, Cfg, mTcs);
   return TRUE;
 }
 
@@ -746,7 +770,7 @@ RpmhSend (
     MicroSecondDelay (1);
   }
 
-  Print (L"    rpmh %05x <- %08x: %r (cmd status %08x)\r\n", Addr, Data, Status,
+  TPrint (L"    rpmh %05x <- %08x: %r (cmd status %08x)\r\n", Addr, Data, Status,
          TcsRead (mTcs, mR->CmdStatus));
 
   // __tcs_set_trigger(false), reclaim
@@ -771,7 +795,7 @@ BcmVote (
 
   Addr = CmdDbFind (Name, &Aux);
   if (Addr == 0) {
-    Print (L"    BCM %a not in cmd-db\r\n", Name);
+    TPrint (L"    BCM %a not in cmd-db\r\n", Name);
     return EFI_NOT_FOUND;
   }
   return RpmhSend (Addr, BIT30 | BIT29 | ((Vote & 0x3FFFU) << 14) | (Vote & 0x3FFFU));
@@ -792,7 +816,7 @@ VrmEnable (
   EFI_STATUS  Status;
 
   Addr = CmdDbFind (Name, NULL);
-  Print (L"  vrm %a @%05x -> %u mV\r\n", Name, Addr, Millivolt);
+  TPrint (L"  vrm %a @%05x -> %u mV\r\n", Name, Addr, Millivolt);
   if (Addr == 0) {
     return EFI_NOT_FOUND;
   }
@@ -865,20 +889,20 @@ EnableQupClocks (
   // reads "off" whenever the branch is idle (Linux skips the halt check in that mode).  Turn
   // the gating off so the branch really stays running and the status becomes meaningful.
   if (((M | C) & BIT31) == 0 && ((S & BIT31) != 0) && ((S & BIT1) != 0)) {
-    Print (L"  s_ahb is hw-gated (%08x): disabling hwcg\r\n", S);
+    TPrint (L"  s_ahb is hw-gated (%08x): disabling hwcg\r\n", S);
     MmioAnd32 (GCC_BASE + GCC_WRAP0_S_AHB_HALT, ~(UINT32)BIT1);
     if (WaitQupClocks (&M, &S, &C, 5)) {
       goto On;
     }
-    Print (L"  hwcg off, s_ahb still %08x\r\n", S);
+    TPrint (L"  hwcg off, s_ahb still %08x\r\n", S);
   }
 
   // Stage 2: RPMh bus vote (QUP core / config NoC BCMs), as the downstream kernel does.
   Aux1 = Aux2 = 0;
-  Print (L"  cmd-db: QUP0 @%05x CN0 @%05x (hdr %08x %08x)\r\n",
+  TPrint (L"  cmd-db: QUP0 @%05x CN0 @%05x (hdr %08x %08x)\r\n",
          CmdDbFind ("QUP0", &Aux1), CmdDbFind ("CN0", &Aux2),
          MmioRead32 (CMD_DB_BASE), MmioRead32 (CMD_DB_BASE + 4));
-  Print (L"  bcm unit QUP0 %08x CN0 %08x\r\n", Aux1, Aux2);
+  TPrint (L"  bcm unit QUP0 %08x CN0 %08x\r\n", Aux1, Aux2);
 
   if (!RscInit ()) {
     goto Fail;
@@ -890,7 +914,7 @@ EnableQupClocks (
     if (WaitQupClocks (&M, &S, &C, 5)) {
       goto On;
     }
-    Print (L"  vote %x: s_ahb %08x\r\n", Vote, S);
+    TPrint (L"  vote %x: s_ahb %08x\r\n", Vote, S);
   }
 
 Fail:
@@ -898,7 +922,7 @@ Fail:
   return FALSE;
 
 On:
-  Print (L"  QUP clocks on (m %08x s %08x se4 %08x, rcg cfg %08x)\r\n", M, S, C,
+  TPrint (L"  QUP clocks on (m %08x s %08x se4 %08x, rcg cfg %08x)\r\n", M, S, C,
          MmioRead32 (GCC_BASE + GCC_WRAP0_S4_RCG + 4));
   return TRUE;
 }
@@ -922,10 +946,10 @@ MunchTouchReadyToBoot (
 
   gBS->CloseEvent (Event);
 
-  Print (L"\r\nMunchTouch step 2\r\n");
+  TPrint (L"\r\nMunchTouch step 2\r\n");
 
   if (!EnableQupClocks ()) {
-    MicroSecondDelay (20000000);
+    MicroSecondDelay (3000000);
     return;
   }
 
@@ -941,7 +965,7 @@ MunchTouchReadyToBoot (
   // Rails: 1.8 V I/O first, then 3.2 V core (same order as the Linux driver), through RPMh.
   if (!RscInit ()) {
     Print (L"  RSC not usable: cannot power the touch chip\r\n");
-    MicroSecondDelay (15000000);
+    MicroSecondDelay (3000000);
     return;
   }
   VrmEnable ("ldoc1", 1800);
@@ -954,86 +978,33 @@ MunchTouchReadyToBoot (
   // Release reset and give the chip time to boot.
   PinOutput (TLMM_SOUTH, TS_RESET_GPIO, TRUE);
   MicroSecondDelay (300000);
-  Print (L"  reset released, irq pin %u\r\n", PinInput (TLMM_SOUTH, TS_IRQ_GPIO));
+  TPrint (L"  reset released, irq pin %u\r\n", PinInput (TLMM_SOUTH, TS_IRQ_GPIO));
 
   // Serial engine.  Registers are only touched now that the clocks are confirmed running.
   Fw = SE_READ (GENI_FW_REVISION_RO);
-  Print (L"  se4: fw %08x proto %u hw0 %08x ifdis %08x lock %08x\r\n",
+  TPrint (L"  se4: fw %08x proto %u hw0 %08x ifdis %08x lock %08x\r\n",
          Fw, (Fw >> 8) & 0xFF, SE_READ (GENI_HW_PARAM_0),
          SE_READ (GENI_IF_DISABLE_RO), SE_READ (GENI_MULTILOCK_MSA_RO));
 
   if (((Fw >> 8) & 0xFFU) != SPI_PROTOCOL) {
-    Print (L"  SE4 firmware is not SPI (proto %u): stopping\r\n", (Fw >> 8) & 0xFF);
-    MicroSecondDelay (8000000);
+    TPrint (L"  SE4 firmware is not SPI (proto %u): stopping\r\n", (Fw >> 8) & 0xFF);
+    MicroSecondDelay (3000000);
     return;
   }
   if ((SE_READ (GENI_IF_DISABLE_RO) & BIT0) != 0) {
-    Print (L"  SE4 FIFO interface disabled (GPI DMA only): stopping\r\n");
-    MicroSecondDelay (8000000);
+    TPrint (L"  SE4 FIFO interface disabled (GPI DMA only): stopping\r\n");
+    MicroSecondDelay (3000000);
     return;
   }
 
   GeniInit ();
-  Print (L"  se4 initialised, clk cfg %08x status %08x\r\n",
+  TPrint (L"  se4 initialised, clk cfg %08x status %08x\r\n",
          SE_READ (GENI_SER_M_CLK_CFG), SE_READ (GENI_STATUS));
-
-  // Register readback: do the writes stick?
-  Print (L"  tx pk %08x %08x rx pk %08x %08x gran %x wl %x trcfg %x\r\n",
-         SE_READ (GENI_TX_PACKING_CFG0), SE_READ (GENI_TX_PACKING_CFG1),
-         SE_READ (GENI_RX_PACKING_CFG0), SE_READ (GENI_RX_PACKING_CFG1),
-         SE_READ (GENI_BYTE_GRAN), SE_READ (SPI_WORD_LEN), SE_READ (SPI_TRANS_CFG));
-
-  // Self test: SE loopback (MOSI -> MISO inside the engine) proves clocks and FIFOs work.
-  {
-    UINT8   LbTx[4] = {0xA5, 0x3C, 0x0F, 0xF0};
-    UINT8   LbRx[4];
-    UINT32  LbIrq;
-    UINT32  Variant;
-
-    for (Variant = 0; Variant < 1; Variant++) {
-      SetMem (LbRx, sizeof (LbRx), 0xEE);
-      SE_WRITE (SPI_LOOPBACK, 1);
-      S1 = GeniTransfer (LbTx, LbRx, 4, &LbIrq, Variant == 1);
-      Print (L"  loopback%u: %02x %02x %02x %02x %r irq %08x txst %08x rxst %08x lb %x\r\n", Variant,
-             LbRx[0], LbRx[1], LbRx[2], LbRx[3], S1, LbIrq, SE_READ (0x800), SE_READ (GENI_RX_FIFO_STATUS),
-             SE_READ (SPI_LOOPBACK));
-      SE_WRITE (SPI_LOOPBACK, 0);
-    }
-  }
-
-  // Is MISO driven by the chip?  Read the pin without and with a pull-up.
-  Print (L"  miso level: no pull %u", PinInput (TLMM_NORTH, SPI_GPIO_FIRST));
-  PinSetup (TLMM_NORTH, SPI_GPIO_FIRST, PIN_CTL (1, 3, 2, 0));
-  MicroSecondDelay (1000);
-  Print (L", pull-up %u (irq %u)\r\n", PinInput (TLMM_NORTH, SPI_GPIO_FIRST), PinInput (TLMM_SOUTH, TS_IRQ_GPIO));
-  PinSetup (TLMM_NORTH, SPI_GPIO_FIRST, PIN_CTL (1, 0, 2, 0));
 
   Id1 = Id2 = 0;
   S1 = S2 = EFI_NOT_STARTED;
-  for (Attempt = 0; Attempt < 4; Attempt++) {
-    UINT8  Tx2[FTS_XFER_LEN];
-    UINT8  Rx2[FTS_XFER_LEN];
-    UINT32 Irq2;
-
-    SE_WRITE (SPI_CPHA, Attempt & 1);
-    SE_WRITE (SPI_CPOL, ((Attempt & 2) != 0) ? BIT2 : 0);
-
+  for (Attempt = 0; Attempt < 5; Attempt++) {
     S1 = FtsReadReg (FTS_REG_CHIP_ID, &Id1, Raw);
-    Print (L"  mode %u A3: %02x %02x %02x %02x|%02x %02x %02x|%02x|%02x %02x %r\r\n", Attempt,
-           Raw[0], Raw[1], Raw[2], Raw[3], Raw[4], Raw[5], Raw[6], Raw[7], Raw[8], Raw[9], S1);
-
-    if (Attempt != 0) {
-      goto SkipNoCrc;
-    }
-    ZeroMem (Tx2, sizeof (Tx2));
-    Tx2[0] = FTS_REG_CHIP_ID;
-    Tx2[1] = 0x80;                                            // read, no CRC
-    Tx2[3] = 1;
-    GeniTransfer (Tx2, Rx2, FTS_XFER_LEN, &Irq2, FALSE);
-    Print (L"         no-crc: %02x %02x %02x %02x|%02x %02x %02x|%02x|%02x %02x\r\n",
-           Rx2[0], Rx2[1], Rx2[2], Rx2[3], Rx2[4], Rx2[5], Rx2[6], Rx2[7], Rx2[8], Rx2[9]);
-
-SkipNoCrc:
     if (!EFI_ERROR (S1)) {
       S2 = FtsReadReg (FTS_REG_CHIP_ID2, &Id2, Raw);
       break;
@@ -1042,14 +1013,14 @@ SkipNoCrc:
   }
 
   if (EFI_ERROR (S1)) {
-    Print (L"  last attempt raw: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x  %r\r\n",
+    TPrint (L"  last attempt raw: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x  %r\r\n",
            Raw[0], Raw[1], Raw[2], Raw[3], Raw[4], Raw[5], Raw[6], Raw[7], Raw[8], Raw[9], S1);
     Print (L"  Touch chip ID: NOT READ (%r) m_irq %08x\r\n", S1, SE_READ (GENI_M_IRQ_STATUS));
   } else {
-    Print (L"  Touch chip ID: %02x %02x (expect 56 52)  %r\r\n", Id1, Id2, S2);
+    Print (L"MunchTouch: chip ID %02x %02x\r\n", Id1, Id2);
   }
 
-  MicroSecondDelay (20000000);
+  MicroSecondDelay (MUNCH_TOUCH_VERBOSE ? 20000000 : 1000000);
 }
 
 EFI_STATUS

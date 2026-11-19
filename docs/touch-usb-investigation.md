@@ -99,10 +99,21 @@ Shutting down Windows ends in `INTERNAL_POWER_ERROR` (0xA0). One earlier log ent
 
 ## Touch firmware bring-up (branch `feat/munch-touch`, not merged)
 
-Findings from running `MunchTouchDxe` on the device (2026-11-18):
+**Result (2026-11-18/19): proof of life reached.** `MunchTouchDxe` reads the FocalTech chip ID from firmware: `Touch chip ID: 56 52 (expect 56 52)`. The SPI bus, rails and framing (4-byte header, 3 dummy bytes, CRC16-kermit) are all confirmed. Windows still needs a FocalTech SPI touch driver (none in the image).
 
-* The touch SPI bus is QUP wrapper 0 serial engine 4 (`0x990000`) on **GPIO 8-11** (function 1), reset GPIO 33, IRQ GPIO 39. (GPIO 119-122, used by the first probe, belong to SE3.) Supplies are `pm8150a_l1` (1.8 V) and `pm8150a_l10` (3.2 V), i.e. PM8150L (SPMI SID 4) LDO1/LDO10, normally switched by RPMh.
-* The bootloader leaves everything unconfigured. Voting the clocks through `GCC_APCS_CLOCK_BRANCH_ENA_VOTE` (`0x52008`) starts `m_ahb`, `core`, `core_2x` and the SE4 clock, but `gcc_qupv3_wrap_0_s_ahb_clk` (status `0x17008` = `0x80000002`) stays off, even with its own enable bit written directly. The SE4 registers cannot be accessed safely without it, so the firmware stops there.
-* Probable cause: that branch waits on a bus/NoC power request that only Qualcomm's RPMh/PEP code makes, the same dependency that blocks Windows' real PEP. Getting further needs an RPMh (RSC) client in firmware, or a working PEP.
-* The firmware side is written (pins, rails over SPMI, GENI SPI init, FTS framing with CRC, chip ID read of registers `0xA3`/`0x9F`, expected `56 52`) but untested past the clock step.
-* Windows would still need a FocalTech SPI touch driver (the image has none).
+What was wrong, in the order it was found (each item came from filming the boot screen):
+
+1. **`s_ahb` was never broken.** `gcc_qupv3_wrap_0_s_ahb_clk` (`0x17008`) has hardware clock gating (bit 1). With it on, the status bit 31 reads "off" while the branch is idle; Linux skips the halt check in that mode (`clk_branch_in_hwcg_mode`). Clearing bit 1 makes the status read on (`0x00000000`) and SE4 becomes accessible (`fw 00000101`, proto 1 = SPI, FIFO interface enabled). The RPMh bus-vote theory from the first investigation was wrong for this clock.
+2. **The touch rails cannot be switched over SPMI.** The pm8150l LDOs are on **SPMI SID 5** (SID 4 has no PIDs `0x40-0x4F`; the APID map reports `70 51 106 24 63 53 125 0` APIDs per SID, arbiter `ver 50010000`, PIDs `0x540-0x54A` are owned by EE 4, not Apps). They are controlled by RPMh. Fix: an RPMh client in firmware.
+3. **RPMh from firmware works.**
+   * cmd-db at `0x80860000`: magic `db 30 03 0c` at +4, 8 resource headers from +8 (16 bytes each), data from `0x90`, entries 24 bytes (`id[8]`, `prio[2]`, `addr`, `len`, `offset`). `ldoc1` = `0x42D00`, `ldoc10` = `0x41200` (`ldoc10` +4 = enable).
+   * APPS RSC DRV2 at `0x18220000`: id `0x00020000` (v2.x register layout), child cfg `0x800C8104` (8 TCS for DRV2), TCS base `0x18220000 + 0xD00`, stride 672 bytes. The bootloader leaves TCS0 busy (cmd_enable 1, control `0x01010000`), so TCS1 (control `0x00010000`, idle) is used.
+   * A VRM vote is: voltage in mV at `addr+0`, enable `1` at `addr+4`, msgid `8 | RESP_REQ | WRITE`, trigger via CONTROL (AMC enable then trigger), completion = command status bit 16 (`0x00010101`). The RSC IRQ status bit is not reliable here; poll the command status. Votes: `ldoc1` 1800 mV, `ldoc10` 3200 mV. Verified by reading the LDO registers over SPMI (read-only observer): `vset 0708` / `0CF0`, enable `0x80`.
+   * No BCM vote (QUP0/CN0) was needed for QUP; the fallback code for it is still in the driver but unused.
+4. **SPI command opcode.** Full duplex is GENI opcode **3** (`TX_ONLY | RX_ONLY`). Opcode 7 is "TX then RX": it sends all bytes and only then clocks in the reply, which gave all-equal RX bytes (`0D 0D ...`) and a zero loopback. With opcode 3 the SE loopback returns `A5 3C 0F F0` and the chip answers.
+5. SPI mode 0 works, 19.2 MHz / 4. Pins GPIO 8-11 function 1 (`qup4`) confirmed against the live DT and `pinctrl-sm8250.c`. Reset GPIO 33 is released 300 ms after the rails; the irq pin (GPIO 39) reads 1 afterwards.
+
+Open points:
+* The driver holds the boot screen 20 s and is a test build; it must not go into master as is (it prints on screen and stops the boot for 20 s). Next step for a real touch driver is on the Windows side (ACPI SPI node, FocalTech driver); the firmware only needs to power the rails, or Windows needs its own RPMh path (PEP) to do it.
+* `L10` reads `vset 0CF0` (3.28 V) after the vote of 3200 mV (PMIC step rounding, not investigated).
+

@@ -2,6 +2,11 @@ name: Build munchfts (Windows touch driver)
 
 on:
   workflow_dispatch:
+  push:
+    branches: [feat/munch-touch]
+    paths:
+      - "windows/**"
+      - ".github/workflows/build-munchfts.yml"
 
 jobs:
   build:

@@ -14,8 +14,10 @@
  */
 
 #include <ntddk.h>
+#include <stdarg.h>
 #include <wdf.h>
 #include <vhf.h>
+#include <ntstrsafe.h>
 
 #define POOL_TAG 'stfM'
 
@@ -87,6 +89,9 @@ typedef struct _DEVICE_CONTEXT {
     BOOLEAN     WasTouching;
     ULONG       Failures;
     ULONG       Frames;
+    ULONG       Polls;
+    NTSTATUS    LastStatus;
+    UCHAR       LastData[16];
 } DEVICE_CONTEXT, *PDEVICE_CONTEXT;
 
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(DEVICE_CONTEXT, GetContext)
@@ -314,6 +319,43 @@ static NTSTATUS FtsRead(PDEVICE_CONTEXT C, UCHAR Reg, UCHAR DataLen, UCHAR *Out)
     return STATUS_SUCCESS;
 }
 
+// ---------------------------------------------------------------- file log (C:\Windows\Temp\munchfts.log)
+static VOID LogF(const char *Fmt, ...)
+{
+    char Buf[256];
+    size_t Len = 0;
+    va_list Args;
+    UNICODE_STRING Name = RTL_CONSTANT_STRING(L"\\SystemRoot\\Temp\\munchfts.log");
+    OBJECT_ATTRIBUTES Oa;
+    IO_STATUS_BLOCK Io;
+    HANDLE H;
+    LARGE_INTEGER Off;
+    LARGE_INTEGER Now;
+
+    if (KeGetCurrentIrql() != PASSIVE_LEVEL) {
+        return;
+    }
+    KeQueryTickCount(&Now);
+    RtlStringCbPrintfA(Buf, sizeof(Buf), "[%lu] ", (ULONG)(Now.QuadPart * KeQueryTimeIncrement() / 10000));
+    RtlStringCbLengthA(Buf, sizeof(Buf), &Len);
+    va_start(Args, Fmt);
+    RtlStringCbVPrintfA(Buf + Len, sizeof(Buf) - Len, Fmt, Args);
+    va_end(Args);
+    RtlStringCbCatA(Buf, sizeof(Buf), "\r\n");
+    RtlStringCbLengthA(Buf, sizeof(Buf), &Len);
+
+    InitializeObjectAttributes(&Oa, &Name, OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE, NULL, NULL);
+    if (!NT_SUCCESS(ZwCreateFile(&H, FILE_APPEND_DATA | SYNCHRONIZE, &Oa, &Io, NULL, FILE_ATTRIBUTE_NORMAL,
+                                 FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_OPEN_IF,
+                                 FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE, NULL, 0))) {
+        return;
+    }
+    Off.QuadPart = -1;                                // FILE_WRITE_TO_END_OF_FILE
+    Off.LowPart = FILE_WRITE_TO_END_OF_FILE;
+    ZwWriteFile(H, NULL, NULL, NULL, &Io, Buf, (ULONG)Len, &Off, NULL);
+    ZwClose(H);
+}
+
 // ---------------------------------------------------------------- touch decode
 static VOID PollOnce(PDEVICE_CONTEXT C)
 {
@@ -330,10 +372,12 @@ static VOID PollOnce(PDEVICE_CONTEXT C)
     }
 
     Status = FtsRead(C, FTS_REG_TOUCH, FTS_DATA_LEN, Data);
+    C->LastStatus = Status;
     if (!NT_SUCCESS(Status)) {
         C->Failures++;
         return;
     }
+    RtlCopyMemory(C->LastData, Data, sizeof(C->LastData));
 
     B[0] = FTS_REG_TOUCH;
     RtlCopyMemory(&B[1], Data, FTS_DATA_LEN);
@@ -393,6 +437,14 @@ VOID EvtPoll(WDFTIMER Timer)
     PDEVICE_CONTEXT C = GetContext(WdfTimerGetParentObject(Timer));
 
     PollOnce(C);
+    C->Polls++;
+    if (C->Polls <= 4 || (C->Polls < 8000 && (C->Polls % 250) == 0) || (C->Polls % 5000) == 0) {
+        LogF("poll %lu frames %lu fail %lu last %08x gpio39 %lu data %02x %02x %02x %02x %02x %02x %02x %02x",
+             C->Polls, C->Frames, C->Failures, C->LastStatus,
+             C->Gpio ? (READ_REGISTER_ULONG((PULONG)(C->Gpio + 4)) & 1) : 9UL,
+             C->LastData[0], C->LastData[1], C->LastData[2], C->LastData[3],
+             C->LastData[4], C->LastData[5], C->LastData[6], C->LastData[7]);
+    }
     if (C->Ready) {
         WdfTimerStart(Timer, WDF_REL_TIMEOUT_IN_MS(POLL_MS));
     }
@@ -433,15 +485,20 @@ NTSTATUS EvtPrepareHardware(WDFDEVICE Device, WDFCMRESLIST Raw, WDFCMRESLIST Tra
         } else if (Mem == 1) {
             C->Gpio = MmMapIoSpaceEx(D->u.Memory.Start, D->u.Memory.Length, PAGE_READWRITE | PAGE_NOCACHE);
         }
+        LogF("resource %lu start %llx len %lx", Mem, D->u.Memory.Start.QuadPart, D->u.Memory.Length);
         Mem++;
     }
+    LogF("prepare: %lu resources, %lu memory, Se %p Gpio %p", N, Mem, C->Se, C->Gpio);
     if (C->Se == NULL) {
         return STATUS_DEVICE_CONFIGURATION_ERROR;
     }
+    LogF("se4: fw %08x ifdis %08x clk %08x status %08x hw0 %08x", SeRead(C, GENI_FW_REVISION_RO),
+         SeRead(C, GENI_IF_DISABLE_RO), SeRead(C, GENI_SER_M_CLK_CFG), SeRead(C, 0x040), SeRead(C, GENI_HW_PARAM_0));
 
     // Only continue if the engine really is the SPI firmware and the FIFO interface is on.
     if (((SeRead(C, GENI_FW_REVISION_RO) >> 8) & 0xFF) != SPI_PROTOCOL ||
         (SeRead(C, GENI_IF_DISABLE_RO) & 1) != 0) {
+        LogF("se4 is not an SPI engine with FIFO interface");
         return STATUS_DEVICE_CONFIGURATION_ERROR;
     }
     GeniInit(C);
@@ -475,8 +532,10 @@ NTSTATUS EvtD0Entry(WDFDEVICE Device, WDF_POWER_DEVICE_STATE Prev)
     // Chip ID as a sanity check (expected 0x56); log only, polling starts either way.
     Status = FtsRead(C, FTS_REG_CHIP_ID, 1, &Id1);
     KdPrint(("munchfts: chip id %02x status %08x\n", Id1, Status));
+    LogF("D0 entry: chip id %02x status %08x", Id1, Status);
 
     Status = VhfStart(C->Vhf);
+    LogF("VhfStart %08x", Status);
     if (!NT_SUCCESS(Status)) {
         return Status;
     }
@@ -515,6 +574,7 @@ NTSTATUS EvtDeviceAdd(WDFDRIVER Driver, PWDFDEVICE_INIT Init)
     WdfDeviceInitSetPnpPowerEventCallbacks(Init, &Pnp);
 
     WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&Attr, DEVICE_CONTEXT);
+    Attr.ExecutionLevel = WdfExecutionLevelPassive;     // timer runs at PASSIVE_LEVEL (file logging)
     Status = WdfDeviceCreate(&Init, &Attr, &Device);
     if (!NT_SUCCESS(Status)) {
         return Status;
@@ -536,6 +596,7 @@ NTSTATUS EvtDeviceAdd(WDFDRIVER Driver, PWDFDEVICE_INIT Init)
     Vhf.VersionNumber = 0x0001;
     Vhf.EvtVhfAsyncOperationGetFeature = EvtVhfGetFeature;
     Status = VhfCreate(&Vhf, &C->Vhf);
+    LogF("DeviceAdd: VhfCreate %08x", Status);
     return Status;
 }
 
@@ -543,6 +604,7 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 {
     WDF_DRIVER_CONFIG Cfg;
 
+    LogF("DriverEntry");
     WDF_DRIVER_CONFIG_INIT(&Cfg, EvtDeviceAdd);
     return WdfDriverCreate(DriverObject, RegistryPath, WDF_NO_OBJECT_ATTRIBUTES, &Cfg, WDF_NO_HANDLE);
 }

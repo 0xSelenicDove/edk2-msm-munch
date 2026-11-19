@@ -148,3 +148,11 @@ Touch input works in Windows on the munch with `munchfts.sys` (branch `feat/munc
   * Windows 11 24H2 (build 26100) ARM64, test signing on. CI (`build-munchfts.yml`, windows-2022 + NuGet WDK 10.0.26100.6584) builds, test-signs and makes the catalog (`munchfts-test.cer` must be added to the Root and TrustedPublisher stores).
   * Install without a shell on the phone: from Android, `fsck.ntfs -d` then `mount.ntfs -o rw` on the Windows partition (`/dev/block/sda36`, dirty after every forced restart), copy the package to `C:\munchfts` plus a Startup script (`...\Users\<user>\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\munchfts-startup.cmd`) that re-launches `install.cmd` elevated (UAC prompt, click Yes with the mouse) unless `C:\munchfts\done.txt` exists. Remove `done.txt` to re-run it.
 * Open points: the system thread polls forever at 125 Hz (no D-state or sleep handling, no interrupt), rails/clocks and Windows sleep are untested, the on-screen firmware line and test-cert install are test-grade, and none of this is merged to master.
+
+### Calibration (2026-11-19)
+
+* The chip reports positions in 1/8 pixel units: range about 0..8639 x 0..19199 for the 1080x2400 panel (first guess of 10800 x 24000 from the DT `display-coords` was wrong and made touches fall short away from the top-left). The HID descriptor now uses 8639 x 19199.
+* Idle frames are all `0xFF` (point count `0x0F`); they are treated as "no contact" so a pending finger is lifted.
+* The chip never reports the outermost strip: smallest values seen were X ~41 and Y ~195-228 (about 5 px and 25-28 px from the edge), largest X ~8290, Y ~19110. `MapAxis()` stretches only the outer zones (about 100 px left/right, 200 px top/bottom) so the corners can be reached; the middle of the screen is unchanged. Corner taps (recycle bin, top-left) are still harder than elsewhere.
+* Writing the edge-filter register `0x9c` (vendor default 2) to 0 took effect (read back 0) but did not make the top corners easier, so it is left at the default (the driver only logs it).
+* A new driver can be swapped without UAC or reinstall by overwriting `munchfts.sys` in every `Windows\System32\DriverStore\FileRepository\munchfts.inf_arm64_*` directory (integrity checks are disabled), then a normal reboot.

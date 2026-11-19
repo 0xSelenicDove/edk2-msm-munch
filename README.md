@@ -35,6 +35,7 @@
 * **Native File System Drivers:** `NtfsDxe`, `FatPkg` (`EnhancedFatDxe`), `ExfatDxe`, `Ext2Dxe`.
 * **Direct Windows ARM Loader:** BDS detects `\EFI\Microsoft\Boot\bootmgfw.efi` on the mounted filesystems.
 * **USB host works:** `MunchOtgDxe` powers the port (VBUS) and `MunchUsbDxe` brings the USB controller up in host mode before Windows starts, so a **USB mouse/keyboard works in Windows** through Windows' standard xHCI driver.
+* **Touchscreen works:** `MunchTouchDxe` powers the FocalTech controller (RPMh rails, reset, SPI engine) and a small Windows driver, `munchfts` (`windows/munchfts`), reports touches to Windows as a 10-point HID touchscreen. See [Touchscreen](#touchscreen-munchfts).
 * **Fast status text:** 20 ms per line on the early framebuffer console.
 
 ---
@@ -118,7 +119,7 @@ bcdedit /store BCD /set {default} bootstatuspolicy IgnoreAllFailures
 ## 📊 Current Status (Windows 11 ARM on POCO F4)
 
 > [!WARNING]
-> **Work in progress.** Windows boots to the desktop, a **USB mouse/keyboard works**, and you can switch between Android and Windows at startup. **Touchscreen does not work yet.**
+> **Work in progress.** Windows boots to the desktop, a **USB mouse/keyboard works**, the **touchscreen works** (needs the `munchfts` driver, see below), and you can switch between Android and Windows at startup.
 
 | Component | Status | Details |
 | :--- | :--- | :--- |
@@ -130,7 +131,7 @@ bcdedit /store BCD /set {default} bootstatuspolicy IgnoreAllFailures
 | **USB-C host (mouse/keyboard)** | 🟢 **Working** | Firmware brings the controller up in host mode; Windows uses the inbox xHCI driver (`PNP0D10`). The phone's port is USB 2.0 hardware |
 | **USB-C power (VBUS/OTG)** | 🟢 **Working** | `MunchOtgDxe` enables the PM8150B OTG boost |
 | **USB-C device mode / role switching** | 🔴 **Not working** | Needs the Type-C manager and a real PEP (see below) |
-| **Touchscreen** | 🔴 **Not working** | FocalTech on SPI (QUP SE4, reset GPIO33, IRQ GPIO39); needs bus/GPIO/PEP ACPI nodes |
+| **Touchscreen** | 🟢 **Working** | FocalTech FTS on SPI (QUP SE4). Firmware `MunchTouchDxe` + ACPI `MFTS0001` + Windows driver `munchfts` (VHF touchscreen). The outermost ~25 px at the top edge are hard to reach; no sleep/resume support yet |
 | **GPU / Wi-Fi / Bluetooth / Audio / Battery / Cellular** | ⚪ **Not started** | Need ACPI nodes and drivers that are not present yet |
 
 ### How USB host was made to work
@@ -140,9 +141,17 @@ bcdedit /store BCD /set {default} bootstatuspolicy IgnoreAllFailures
 * The DSDT exposes `USB0` as a plain ACPI xHCI (`PNP0D10`). Qualcomm's `qcxhcifilter` driver (`QCOM25A6`) hangs Windows with `CLOCK_WATCHDOG_TIMEOUT`, so it is not used.
 * Windows' own USB-C stack is not used either: the Type-C port manager and URS role switch depend on Qualcomm's PEP (power engine), and the real `QCOM2519` PEP fails to start (`CM_PROB_FAILED_ADD`) without full SM8250 clock/power tables. USB therefore only works as a host. (The phone has a USB 2.0 port, so nothing is lost on speed.)
 
-### Why touch still doesn't work
-* The touchscreen is a FocalTech chip on SPI (QUP SE4, reset GPIO33, IRQ GPIO39). Windows needs the SPI bus, GPIO controller and PEP nodes for it; they have the same dependency on a working power controller.
-* Qualcomm's closed `PmicDxe` (taken from a different product) asserts and bootloops on munch, so it stays disabled; keys are read directly by `MunchButtonsDxe` instead.
+<a id="touchscreen-munchfts"></a>
+### Touchscreen (`munchfts`)
+There is no working PEP on this platform, so Qualcomm's SPI/GPIO drivers cannot be used. Instead:
+
+* **Firmware (`MunchTouchDxe`)** runs before Windows starts: it enables the QUP clocks (the `s_ahb` branch has hardware clock gating, which only *looks* like it is off), muxes the SPI pins (GPIO 8-11), powers the two touch rails through an **RPMh** request (pm8150l `ldoc1` 1.8 V and `ldoc10` 3.2 V; they are owned by RPMh and cannot be switched over SPMI; the vote goes through the APPS RSC DRV2 using addresses from the AOP command DB), releases reset (GPIO 33) and initialises the GENI serial engine (SPI mode 0, full-duplex opcode 3). It prints one line, `MunchTouch: chip ID 56 52`, and waits 1 s. Set `MUNCH_TOUCH_VERBOSE` in `MunchTouchDxe.c` for the full bring-up log.
+* **ACPI** (`touch_fts.asl`): device `MFTS0001` exposing the SE4 registers and the GPIO 39 page. **`DSDT.aml` is a committed file**: after editing any `.asl`, run the *Build munch DSDT.aml* workflow and commit its output.
+* **Windows driver (`windows/munchfts`)**: a KMDF driver that talks to SE4 directly, polls the FTS touch frame every 8 ms and reports up to 10 contacts through the Virtual HID Framework. Raw coordinates are 1/8 pixel (0..8639 x 0..19199). The CI workflow *Build munchfts* builds it for ARM64 (WDK from NuGet), test-signs it and produces `munchfts.sys`, `munchfts.inf`, `munchfts.cat` and `munchfts-test.cer`.
+* **Installing the driver** (needs test signing, already set by the BCD steps above): add `munchfts-test.cer` to the *Trusted Root* and *Trusted Publishers* stores, then `pnputil /add-driver munchfts.inf /install` from an elevated prompt (reboot afterwards; the INF adds `vhf` as a lower filter). Driver log: `C:\Windows\Temp\munchfts.log`.
+* Known gaps: polling instead of an interrupt, no sleep/resume handling, the outermost strip of the top edge is not reported by the chip, and the test certificate is self-signed.
+
+The remaining reason for the fake PEP is unchanged: Qualcomm's closed `PmicDxe` (taken from a different product) asserts and bootloops on munch, so it stays disabled; keys are read directly by `MunchButtonsDxe` instead.
 
 See [docs/touch-usb-investigation.md](docs/touch-usb-investigation.md) for the investigation notes.
 

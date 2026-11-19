@@ -16,6 +16,9 @@ DefinitionBlock("DSDT.AML", "DSDT", 0x02, "QCOMM ", "SDM850 ", 3)
         // switch on VBUS for the physical connector.
         Include("pmic_typec.asl")
 
+        // FocalTech touch controller (SPI), driven directly by munchfts.sys.
+        Include("touch_fts.asl")
+
 		//
         // Buttons
 		//

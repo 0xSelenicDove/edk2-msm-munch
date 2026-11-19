@@ -1,0 +1,29 @@
+name: Build munch DSDT.aml
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/munch-touch]
+    paths:
+      - "Platform/Xiaomi/sm8250/AcpiTables/munch/**"
+      - ".github/workflows/build-dsdt.yml"
+
+jobs:
+  dsdt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install iasl
+        run: sudo apt-get update -y && sudo apt-get install -y --no-install-recommends acpica-tools
+      - name: Compile Dsdt.asl like build.sh does
+        run: |
+          mkdir -p /tmp/acpi && cd /tmp/acpi
+          cp "$GITHUB_WORKSPACE"/Silicon/Qualcomm/sm8250/AcpiTables/* ./
+          cp "$GITHUB_WORKSPACE"/Platform/Xiaomi/sm8250/AcpiTables/munch/* ./
+          iasl -ve Dsdt.asl
+          ls -l DSDT.aml
+          cp DSDT.aml "$GITHUB_WORKSPACE/DSDT.aml"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: munch-dsdt
+          path: DSDT.aml

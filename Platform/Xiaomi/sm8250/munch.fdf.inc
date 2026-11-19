@@ -28,3 +28,6 @@ INF Platform/Xiaomi/sm8250/Drivers/MunchButtonsDxe/MunchButtonsDxe.inf
 
 // USB host bring-up (clock, UTMI-as-PIPE, host mode) before the OS starts.
 INF Platform/Xiaomi/sm8250/Drivers/MunchUsbDxe/MunchUsbDxe.inf
+
+// Touch bring-up probe (read-only).
+INF Platform/Xiaomi/sm8250/Drivers/MunchTouchDxe/MunchTouchDxe.inf

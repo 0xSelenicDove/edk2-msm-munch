@@ -1,0 +1,62 @@
+;
+; munchfts.inf - FocalTech FTS touch controller on Xiaomi munch (POCO F4), SPI, direct access
+;
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = System
+ClassGuid   = {4D36E97D-E325-11CE-BFC1-08002BE10318}
+Provider    = %ManufacturerName%
+CatalogFile = munchfts.cat
+DriverVer   = 11/19/2026,1.0.0.0
+PnpLockdown = 1
+
+[DestinationDirs]
+DefaultDestDir = 13
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+munchfts.sys = 1,,
+
+[Manufacturer]
+%ManufacturerName% = Standard,NTarm64.10.0...16299
+
+[Standard.NTarm64.10.0...16299]
+%DeviceDesc% = MunchFts_Device, ACPI\MFTS0001
+
+[MunchFts_Device.NT]
+CopyFiles = MunchFts_Files
+
+[MunchFts_Files]
+munchfts.sys
+
+[MunchFts_Device.NT.HW]
+AddReg = MunchFts_AddReg
+
+[MunchFts_AddReg]
+; The Virtual HID Framework attaches as a lower filter; without it VhfCreate fails (0xC00000BB).
+HKR,,"LowerFilters",0x00010000,"vhf"
+
+[MunchFts_Device.NT.Services]
+AddService = munchfts, 0x00000002, MunchFts_Service
+
+[MunchFts_Service]
+DisplayName   = %ServiceDesc%
+ServiceType   = 1
+StartType     = 3
+ErrorControl  = 1
+ServiceBinary = %13%\munchfts.sys
+
+[MunchFts_Device.NT.Wdf]
+KmdfService = munchfts, MunchFts_Wdf
+
+[MunchFts_Wdf]
+KmdfLibraryVersion = 1.15
+
+[Strings]
+ManufacturerName = "munch"
+DiskName         = "munchfts install disk"
+DeviceDesc       = "FocalTech FTS touch controller (SPI)"
+ServiceDesc      = "munchfts touch driver"

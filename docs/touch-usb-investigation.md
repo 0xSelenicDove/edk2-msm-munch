@@ -117,3 +117,19 @@ Open points:
 * The driver holds the boot screen 20 s and is a test build; it must not go into master as is (it prints on screen and stops the boot for 20 s). Next step for a real touch driver is on the Windows side (ACPI SPI node, FocalTech driver); the firmware only needs to power the rails, or Windows needs its own RPMh path (PEP) to do it.
 * `L10` reads `vset 0CF0` (3.28 V) after the vote of 3200 mV (PMIC step rounding, not investigated).
 
+
+## Windows touch driver: feasibility and plan (2026-11-19)
+
+Facts that decide the design:
+
+* **Test signing is on** in the BCD copy we have (`AllowPrereleaseSignatures` `16000049` = 1, `DisableIntegrityChecks` `16000048` = 1), so a test-signed driver loads.
+* **PEP0 is the fake `PNP0D80` stub**, so Qualcomm's SPI/GPIO stack (`qcspi8250` `QCOM250F`, `qcgpio8250` `QCOM250D`) cannot get clocks, pins or regulators from it and is not a safe base. The inbox `hidspi_km` (`PNP0C51`) is no use either: the chip does not speak HID-over-SPI (FTS register protocol with CRC).
+* **The firmware already prepares the hardware** and none of it is undone by Windows (no driver owns it): QUP clock votes (`GCC+0x52008`) with s_ahb hwcg off, GPIO 8-11 muxed to SE4, the two RPMh LDO votes, reset released, SE4 GENI initialised (SPI mode 0, 8 bit, 4.8 MHz). So a Windows driver only has to do register-level SPI transfers and decode touch frames.
+* **Touch frame** (from the vendor `focaltech_core.c`): read register `0x01` (command byte `0xA0` = read + CRC, 2 length bytes, 3 dummy bytes), 63 data bytes: byte 2 low nibble = point count, then 6 bytes per point: `[3]` bits 7:6 event (0 down, 1 up, 2 contact), `[3]` low nibble and `[4]` = X high bits, `[5]` high nibble = id, low nibble and `[6]` = Y, `[7]`/`[8]` = precision and area. X = `((b3 & 0x0F) << 11) + (b4 << 3) + ((b7 & 0xE0) >> 5)`, Y likewise with `b5`, `b6`, `(b7 & 0x1C) >> 2`; ids >= 10 mean no point. Coordinate range 0..10800 x 0..24000 (DT `display-coords` `0x2a30` / `0x5dc0`), 10 points. The INT pin (GPIO 39, active low) signals a frame.
+* One frame is 72 bytes with the framing, more than the SE FIFO (16 words, 64 bytes), so the driver must refill TX and drain RX during the transfer (or read fewer points).
+
+Proposed design (not started):
+
+1. **Firmware** (`MunchTouchDxe`): keep the bring-up, drop the on-screen text and the 20 s hold (quiet mode), keep the RPMh VRM votes. Add an ACPI device `MFTS0001` to the munch DSDT with two memory resources: SE4 (`0x990000`, `0x4000`) and the south TLMM page holding GPIO 39 (`0x0F527000`, `0x1000`, level in the `io` register at +4).
+2. **Windows driver** (KMDF, `munchfts.sys`): map the two resources, poll GPIO 39 every ~8 ms (a GPIO interrupt would need the Qualcomm GPIO driver), do the GENI full-duplex transfer (opcode 3) with FIFO refill, CRC-check, decode, and report through VHF (Virtual HID Framework) as a 10-point HID touch digitizer. Build with the WDK on a GitHub Actions Windows runner (ARM64), test-sign, and install with `pnputil` (needs a way to run commands on the phone: the earlier Startup-folder script, or USB Ethernet + RDP now that USB host works).
+3. Risks: Windows power management without a real PEP (the device stays in D0, fine), the rails/clock votes surviving Windows sleep (untested), and the first driver install needing a working input path (the USB mouse works).

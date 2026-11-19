@@ -32,7 +32,8 @@ jobs:
           New-Item -ItemType Directory -Force -Path out | Out-Null
           $sys = Get-ChildItem -Recurse -Filter munchfts.sys | Select-Object -First 1
           Copy-Item $sys.FullName out\munchfts.sys
-          Copy-Item munchfts.inf out\munchfts.inf
+          $stamped = Get-ChildItem -Recurse -Filter munchfts.inf | Where-Object { $_.FullName -match "ARM64" } | Select-Object -First 1
+          Copy-Item $stamped.FullName out\munchfts.inf
           $inf2cat = Get-ChildItem -Recurse -Path packages -Filter Inf2Cat.exe -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $inf2cat) { $inf2cat = Get-ChildItem -Recurse -Path "C:\Program Files (x86)\Windows Kits\10" -Filter Inf2Cat.exe -ErrorAction SilentlyContinue | Select-Object -First 1 }
           Write-Host "inf2cat: $($inf2cat.FullName)"

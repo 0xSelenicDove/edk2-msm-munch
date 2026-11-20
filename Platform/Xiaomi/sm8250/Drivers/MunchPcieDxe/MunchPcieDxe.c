@@ -1132,6 +1132,45 @@ Probe (
   return V;
 }
 
+/**
+  Prove that memory accesses reach the endpoint: size BAR0, place it at the start of the MEM window,
+  enable memory decoding and read the first MHI registers.  A working path returns real values
+  (MHI version 0x01000000 at +8); all-ones means the window/iATU setup is wrong.
+**/
+STATIC
+VOID
+BarProbe (
+  VOID
+  )
+{
+  UINT32  B0;
+  UINT32  B1;
+  UINT32  Cmd;
+  UINT32  I;
+  UINT32  V[8];
+
+  MmioWrite32 (CONF_BASE + 0x10, 0xFFFFFFFFU);
+  MmioWrite32 (CONF_BASE + 0x14, 0xFFFFFFFFU);
+  B0 = MmioRead32 (CONF_BASE + 0x10);
+  B1 = MmioRead32 (CONF_BASE + 0x14);
+  Log (L"  bar0 sizing %08x %08x (size %x)\r\n", B0, B1, (UINT32)(~(B0 & ~0xFU) + 1));
+
+  MmioWrite32 (CONF_BASE + 0x10, MEM_BASE + 0x100000U + (B0 & 0xFU));   // 0x60400000, 1 MB aligned
+  MmioWrite32 (CONF_BASE + 0x14, 0);
+  Cmd = MmioRead32 (CONF_BASE + 0x04);
+  MmioWrite32 (CONF_BASE + 0x04, (Cmd & 0xFFFFU) | BIT1 | BIT2);       // memory space + bus master
+  Log (L"  bar0 now %08x cmd %08x\r\n", MmioRead32 (CONF_BASE + 0x10), MmioRead32 (CONF_BASE + 0x04));
+
+  Log (L"  probe bar0 @%08x ...\r\n", MEM_BASE + 0x100000U);
+  LogFlush ();
+  for (I = 0; I < 8; I++) {
+    V[I] = MmioRead32 (MEM_BASE + 0x100000U + I * 4);
+  }
+  Log (L"    mhi regs: %08x %08x %08x %08x %08x %08x %08x %08x\r\n", V[0], V[1], V[2], V[3], V[4], V[5], V[6], V[7]);
+  Log (L"    status +48 %08x  +4c %08x\r\n", MmioRead32 (MEM_BASE + 0x100000U + 0x48),
+       MmioRead32 (MEM_BASE + 0x100000U + 0x4C));
+}
+
 STATIC
 VOID
 BringUp (
@@ -1249,6 +1288,7 @@ BringUp (
   Probe (L"bus1 dev1", CONF_BASE + 0x8000U);
   Probe (L"bus1 dev31", CONF_BASE + 0xF8000U);
   Probe (L"rp 00:00.0 again", DBI_BASE);
+  BarProbe ();
   Log (L"MunchPcie: %a\r\n", (Id == 0x110117CBU) ? "QCA6390 FOUND" : "unexpected ID");
   LogFlush ();
 }

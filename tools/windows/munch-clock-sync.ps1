@@ -28,9 +28,24 @@ try {
   exit 1
 }
 
+# A firmware without the rtc.txt writer leaves an old file behind. The counter changes on
+# every boot, so the same value seen from a different Windows boot means it is stale.
+$bootUtc = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime()
+$state = 'C:\munch-clock\last-pmic.txt'
+if (Test-Path $state) {
+  $parts = (Get-Content $state -First 1).Split(' ')
+  $prevBoot = [DateTime]::Parse($parts[1], $null, 'RoundtripKind')
+  if (([uint64]$parts[0] -eq $pmicBoot) -and ([math]::Abs(($bootUtc - $prevBoot).TotalSeconds) -gt 120)) {
+    Log "rtc.txt is stale (pmicBoot=$pmicBoot unchanged since an earlier boot), not saving"
+    mountvol S: /D | Out-Null
+    exit 3
+  }
+}
+Set-Content -Path $state -Value ("$pmicBoot " + $bootUtc.ToString('o'))
+
 # PMIC counter now = counter at firmware read + time since then. Windows started a few
 # seconds after the firmware read the counter; add that fixed lead.
-$lead = 8
+$lead = 4   # measured against an exact Android-side offset: 4 s, not 8
 $boot = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime()
 $utc  = [DateTimeOffset]::UtcNow
 $up   = [math]::Round(($utc.UtcDateTime - $boot).TotalSeconds)

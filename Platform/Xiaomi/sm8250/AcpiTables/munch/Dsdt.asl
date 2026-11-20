@@ -19,6 +19,9 @@ DefinitionBlock("DSDT.AML", "DSDT", 0x02, "QCOMM ", "SDM850 ", 3)
         // FocalTech touch controller (SPI), driven directly by munchfts.sys.
         Include("touch_fts.asl")
 
+        // PCIe root complex 0 with the QCA6390 Wi-Fi/BT chip (brought up by MunchPcieDxe).
+        Include("pcie.asl")
+
 		//
         // Buttons
 		//

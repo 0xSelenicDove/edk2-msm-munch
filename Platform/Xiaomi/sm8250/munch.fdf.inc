@@ -5,6 +5,7 @@ FILE FREEFORM = 7E374E25-8E01-4FEE-87F2-390C23C606CD {
   SECTION RAW = Silicon/Qualcomm/sm8250/AcpiTables/Facp.aml
   SECTION RAW = Silicon/Qualcomm/sm8250/AcpiTables/Gtdt.aml
   SECTION RAW = Silicon/Qualcomm/sm8250/AcpiTables/bgrt.aml
+  SECTION RAW = Platform/Xiaomi/sm8250/AcpiTables/munch/Mcfg.aml
   SECTION UI = "AcpiTables"
 }
 

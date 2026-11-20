@@ -38,7 +38,7 @@
 #include <Protocol/SimpleTextOut.h>
 
 // Seconds the boot screen is held so the log can be read.
-#define MUNCH_PCIE_HOLD_US   20000000U
+#define MUNCH_PCIE_HOLD_US   8000000U
 #define MUNCH_PCIE_LOG_FILE  L"munch-pcie.log"
 #define LOG_CAPACITY         (96 * 1024)
 
@@ -247,7 +247,22 @@ STATIC UINT32          mTcs = 0xFFFFFFFFU;
 #define PARF_SYS_CTRL           0x000U
 #define PARF_PHY_CTRL           0x040U
 #define PARF_DBI_BASE_ADDR      0x168U
-#define PARF_SLV_ADDR_SPACE     0x16CU
+#define PARF_SLV_ADDR_SPACE     0x16CU            // older layout (kept)
+#define PARF_SLV_ADDR_SPACE_V2  0x358U            // mainline PARF_SLV_ADDR_SPACE_SIZE for 2_7_0 / 1_9_0
+// ECAM mode and "ECAM blockers": hardware windows that return an error response instead of
+// forwarding config accesses to non-existent devices (SDM845 AML REB0/EEB0, mainline qcom_pci_config_ecam).
+#define PARF_BLK_WR_BASE        0x360U            // root bus blocker: WR/RD base+hi, limit+hi
+#define PARF_BLK_WR_LIMIT       0x368U
+#define PARF_BLK_RD_BASE        0x370U
+#define PARF_BLK_RD_LIMIT       0x378U
+#define PARF_ECAM_BASE          0x380U
+#define PARF_BLK2_WR_BASE       0x398U            // endpoint bus blocker
+#define PARF_BLK2_WR_LIMIT      0x3A0U
+#define PARF_BLK2_RD_BASE       0x3A8U
+#define PARF_BLK2_RD_LIMIT      0x3B0U
+#define SYS_CTRL_ECAM_BLK_RC    BIT26
+#define SYS_CTRL_ECAM_BLK_EP    BIT30
+#define MSI_FRAME_BASE          0x17A10000U       // GIC MSI frame (MADT), TYPER at +8
 #define PARF_MHI_CLOCK_RESET    0x174U
 #define PARF_AXI_WR_ADDR_HALT   0x1A8U
 #define PARF_LTSSM              0x1B0U
@@ -830,6 +845,7 @@ ParfInit (
   PARF_W (PARF_MHI_CLOCK_RESET, PARF_R (PARF_MHI_CLOCK_RESET) | BIT4);
   PARF_W (PARF_AXI_WR_ADDR_HALT, PARF_R (PARF_AXI_WR_ADDR_HALT) | BIT31);
   PARF_W (PARF_SLV_ADDR_SPACE, PCIE_AXI_SIZE);
+  PARF_W (PARF_SLV_ADDR_SPACE_V2, PCIE_AXI_SIZE);
   V = PARF_R (PARF_SYS_CTRL);
   Log (L"  parf sys_ctrl %08x type %08x\r\n", V, PARF_R (PARF_DEVICE_TYPE));
 }
@@ -1028,6 +1044,61 @@ PinsInit (
   PinSetup (PIN_WLAN_EN, PIN_CTL (0, 1, 7, 1));       // gpio, pull-down, 16 mA, output (low for now)
 }
 
+/**
+  Describe the config space to Windows as a plain ECAM at 0x60000000, buses 0-1:
+    bus 0 dev 0 = root port (DBI), bus 1 dev 0 = endpoint (iATU config region, 1 MB window).
+  Everything else in the two 1 MB windows is blocked by the PARF blockers.  The iATU registers
+  live at 0x60001000, inside the root-bus blocker, so the iATU MUST be programmed first.
+**/
+STATIC
+VOID
+EcamSetup (
+  VOID
+  )
+{
+  UINT32  V;
+
+  IatuOutbound (0, ATU_TYPE_CFG0, CONF_BASE, CONF_BASE + 0xFFFFFU, 0x01000000U);
+  IatuOutbound (1, ATU_TYPE_MEM, MEM_BASE, MEM_LAST, MEM_BASE);
+
+  PARF_W (PARF_ECAM_BASE, PCIE_AXI_BASE);
+  PARF_W (PARF_ECAM_BASE + 4, 0);
+
+  PARF_W (PARF_BLK_WR_BASE, DBI_BASE + 0x1000U);      PARF_W (PARF_BLK_WR_BASE + 4, 0);
+  PARF_W (PARF_BLK_WR_LIMIT, DBI_BASE + 0xFFFFFU);    PARF_W (PARF_BLK_WR_LIMIT + 4, 0);
+  PARF_W (PARF_BLK_RD_BASE, DBI_BASE + 0x1000U);      PARF_W (PARF_BLK_RD_BASE + 4, 0);
+  PARF_W (PARF_BLK_RD_LIMIT, DBI_BASE + 0xFFFFFU);    PARF_W (PARF_BLK_RD_LIMIT + 4, 0);
+
+  PARF_W (PARF_BLK2_WR_BASE, CONF_BASE + 0x1000U);    PARF_W (PARF_BLK2_WR_BASE + 4, 0);
+  PARF_W (PARF_BLK2_WR_LIMIT, CONF_BASE + 0xFFFFFU);  PARF_W (PARF_BLK2_WR_LIMIT + 4, 0);
+  PARF_W (PARF_BLK2_RD_BASE, CONF_BASE + 0x1000U);    PARF_W (PARF_BLK2_RD_BASE + 4, 0);
+  PARF_W (PARF_BLK2_RD_LIMIT, CONF_BASE + 0xFFFFFU);  PARF_W (PARF_BLK2_RD_LIMIT + 4, 0);
+
+  V = PARF_R (PARF_SYS_CTRL);
+  PARF_W (PARF_SYS_CTRL, V | SYS_CTRL_ECAM_BLK_RC | SYS_CTRL_ECAM_BLK_EP);
+
+  Log (L"  ecam: sys_ctrl %08x ecam_base %08x\r\n", PARF_R (PARF_SYS_CTRL), PARF_R (PARF_ECAM_BASE));
+  Log (L"  blk rc %08x..%08x  blk ep %08x..%08x\r\n", PARF_R (PARF_BLK_RD_BASE), PARF_R (PARF_BLK_RD_LIMIT),
+       PARF_R (PARF_BLK2_RD_BASE), PARF_R (PARF_BLK2_RD_LIMIT));
+}
+
+/** Read one ECAM address after logging it, so a hang shows up as the last line of the log. **/
+STATIC
+UINT32
+Probe (
+  IN CONST CHAR16  *What,
+  IN UINT32        Address
+  )
+{
+  UINT32  V;
+
+  Log (L"  probe %s @%08x ...\r\n", What, Address);
+  LogFlush ();
+  V = MmioRead32 (Address);
+  Log (L"    = %08x\r\n", V);
+  return V;
+}
+
 STATIC
 VOID
 BringUp (
@@ -1124,17 +1195,26 @@ BringUp (
   Log (L"  link speed %u width x%u\r\n", (DBI_R (DBI_LNKCTL_STA) >> 16) & 0xFU,
        (DBI_R (DBI_LNKCTL_STA) >> 20) & 0x3FU);
 
-  // 7. config window for 01:00.0 and MEM window, then read the ID
-  STEP (L"7 enumerate\r\n");
-  IatuOutbound (0, ATU_TYPE_CFG0, CONF_BASE, CONF_BASE + 0xFFFU, 0x01000000U);
-  IatuOutbound (1, ATU_TYPE_MEM, MEM_BASE, MEM_LAST, MEM_BASE);
+  // 7. ECAM mode, iATU windows and blockers; then read the ID through ECAM
+  STEP (L"7 ecam\r\n");
+  Log (L"  msi frame typer %08x (SPI base [25:16], count [9:0])\r\n", MmioRead32 (MSI_FRAME_BASE + 8));
+  EcamSetup ();
   MicroSecondDelay (1000);
-  Id = MmioRead32 (CONF_BASE);
+  Id = Probe (L"rp 00:00.0", DBI_BASE);
+  Id = Probe (L"ep 01:00.0", CONF_BASE);
   Log (L"  01:00.0 vendor/device %08x (expect 110117cb)\r\n", Id);
   Log (L"  cmd/status %08x class/rev %08x hdr %08x subsys %08x\r\n",
        MmioRead32 (CONF_BASE + 4), MmioRead32 (CONF_BASE + 8), MmioRead32 (CONF_BASE + 0xC),
        MmioRead32 (CONF_BASE + 0x2C));
   Log (L"  bar0 %08x bar1 %08x\r\n", MmioRead32 (CONF_BASE + 0x10), MmioRead32 (CONF_BASE + 0x14));
+  // What Windows will touch while enumerating: must not hang.
+  Probe (L"bus0 dev0 fn1", DBI_BASE + 0x1000U);
+  Probe (L"bus0 dev1", DBI_BASE + 0x8000U);
+  Probe (L"bus0 dev31", DBI_BASE + 0xF8000U);
+  Probe (L"bus1 dev0 fn1", CONF_BASE + 0x1000U);
+  Probe (L"bus1 dev1", CONF_BASE + 0x8000U);
+  Probe (L"bus1 dev31", CONF_BASE + 0xF8000U);
+  Probe (L"rp 00:00.0 again", DBI_BASE);
   Log (L"MunchPcie: %a\r\n", (Id == 0x110117CBU) ? "QCA6390 FOUND" : "unexpected ID");
   LogFlush ();
 }

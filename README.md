@@ -60,9 +60,28 @@ If you do nothing, Windows starts after the splash.
 
 ---
 
-## 🚀 Install (A/B slot dual boot)
+## 🚀 Install
 
-The recommended layout keeps stock Android untouched in **slot A** and installs UEFI only in **slot B**:
+The easiest way is **[woa-installer](https://github.com/0xSelenicDove/woa-installer)**, a Windows/macOS app (or Python CLI) that does the whole dual-boot flow for you over USB. It was tested end to end on munch: it installs Windows, runs the UEFI installer against the other slot and boots it, and Windows reaches the desktop unattended.
+
+**You need:** an unlocked bootloader, Magisk root (grant the `adb shell` user superuser), USB debugging on, a **Windows 11 ARM64 ISO**, and `uefi-installer-munch.zip` from [Releases](https://github.com/0xSelenicDove/edk2-msm-munch/releases) (or point the installer at this repo and it downloads the latest zip).
+
+1. Download `woa-installer-macos.dmg` or `woa-installer-windows.exe` from the [woa-installer releases](https://github.com/0xSelenicDove/woa-installer/releases) (unsigned: macOS right-click > Open; Windows SmartScreen: More info > Run anyway).
+2. Connect the phone, run the wizard, pick the ISO and the UEFI zip (or `0xSelenicDove/edk2-msm-munch` as the repo), and follow the steps. If the `esp`/`win` partitions don't exist yet it can create them (this erases user data and asks you to confirm).
+3. Let the read-only **pre-check** pass, then install. Stock Android stays untouched in **slot A**; UEFI goes in slot B and the phone reboots into Windows.
+4. First boot sets itself up and signs in automatically (user `user`, blank password).
+5. Switch OS later with the menu (*Reboot to other slot*), or from a PC with `tools/munch-switch-os.sh windows|android`.
+
+Command line equivalent: `python3 woa_installer.py --iso Win11_ARM64.iso --repo 0xSelenicDove/edk2-msm-munch`.
+
+> [!NOTE]
+> At the very last shutdown/restart step Windows shows an `INTERNAL_POWER_ERROR` blue screen (known firmware issue). Hold the power button to restart; the install is fine. If the first boot of Windows setup ever fails, reinstall rather than retrying.
+
+> [!IMPORTANT]
+> Use the **installer ZIP**. The plain `boot-munch.img` is boot header v1 and the bootloader rejects it; stock `boot` is header v3.
+
+<details>
+<summary>Manual install (A/B slot dual boot)</summary>
 
 1. Phone has an unlocked bootloader, Magisk/root, and the Windows 11 ARM64 install on `sda36` (NTFS) + ESP on `sda35`.
 2. **Back up** `boot_a` first (`dd if=/dev/block/bootdevice/by-name/boot_a of=/sdcard/boot_a_stock.img`).
@@ -76,10 +95,8 @@ The recommended layout keeps stock Android untouched in **slot A** and installs 
    sh META-INF/com/google/android/update-binary dummy 1 /data/local/tmp/uefi-installer.zip
    ```
 5. Boot slot B: `fastboot set_active b && fastboot reboot`.
-6. Switch OS later with the menu (*Reboot to other slot*), or from a PC with `tools/munch-switch-os.sh windows|android`.
 
-> [!IMPORTANT]
-> Use the **installer ZIP**. The plain `boot-munch.img` is boot header v1 and the bootloader rejects it; stock `boot` is header v3.
+</details>
 
 ---
 

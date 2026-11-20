@@ -173,6 +173,7 @@ LogFlush (
 #define GCC_PCIE0_AUX_RCG       0x6B038U
 #define GCC_PCIE0_PHY_BCR       0x6C01CU
 #define GCC_PCIE0_NOCSR_BCR     0x6C020U
+#define GCC_PCIE0_PHY_NOCSR_BCR 0x6C028U
 #define GCC_PCIE_PHY_AUX_CBCR   0x6F004U
 #define GCC_PCIE_REFGEN_RCG     0x6F014U
 #define GCC_PCIE0_REFGEN_CBCR   0x6F02CU
@@ -813,34 +814,6 @@ MapRegion (
   return Status;
 }
 
-STATIC
-BOOLEAN
-PhyInit (
-  VOID
-  )
-{
-  UINTN   I;
-  UINT32  Retry;
-
-  for (I = 0; I < ARRAY_SIZE (mPhySeq); I++) {
-    MmioWrite32 (PHY_BASE + mPhySeq[I].Offset, mPhySeq[I].Value);
-    if (mPhySeq[I].DelayUs != 0) {
-      MicroSecondDelay (mPhySeq[I].DelayUs);
-    }
-  }
-  (VOID)MmioRead32 (PHY_BASE + PHY_STATUS);     // make sure the writes are through
-
-  for (Retry = 0; Retry < 200; Retry++) {       // up to 200 ms for the PLL to lock
-    if ((MmioRead32 (PHY_BASE + PHY_STATUS) & PHY_STATUS_BIT) == 0) {
-      Log (L"  phy ready after %u ms (status %08x)\r\n", Retry, MmioRead32 (PHY_BASE + PHY_STATUS));
-      return TRUE;
-    }
-    MicroSecondDelay (1000);
-  }
-  Log (L"  phy NOT ready (status %08x)\r\n", MmioRead32 (PHY_BASE + PHY_STATUS));
-  return FALSE;
-}
-
 /** Root-complex register setup before PERST# is released (qcom_pcie_init_2_7_0 + post_init). **/
 STATIC
 VOID
@@ -859,6 +832,105 @@ ParfInit (
   PARF_W (PARF_SLV_ADDR_SPACE, PCIE_AXI_SIZE);
   V = PARF_R (PARF_SYS_CTRL);
   Log (L"  parf sys_ctrl %08x type %08x\r\n", V, PARF_R (PARF_DEVICE_TYPE));
+}
+
+STATIC
+VOID
+PhyApply (
+  VOID
+  )
+{
+  UINTN  I;
+
+  for (I = 0; I < ARRAY_SIZE (mPhySeq); I++) {
+    MmioWrite32 (PHY_BASE + mPhySeq[I].Offset, mPhySeq[I].Value);
+    if (mPhySeq[I].DelayUs != 0) {
+      MicroSecondDelay (mPhySeq[I].DelayUs);
+    }
+  }
+  (VOID)MmioRead32 (PHY_BASE + PHY_STATUS);     // make sure the writes are through
+}
+
+/** Wait for PHYSTATUS (bit 6 of 0x814) to clear.  Returns the wait in ms, or -1 on timeout. **/
+STATIC
+INT32
+PhyWaitReady (
+  IN UINT32  Ms
+  )
+{
+  UINT32  I;
+
+  for (I = 0; I < Ms; I++) {
+    if ((MmioRead32 (PHY_BASE + PHY_STATUS) & PHY_STATUS_BIT) == 0) {
+      return (INT32)I;
+    }
+    MicroSecondDelay (1000);
+  }
+  return -1;
+}
+
+/** Whole PHY register space to the log file (all of it is within the 4 KB window). **/
+STATIC
+VOID
+PhyDump (
+  VOID
+  )
+{
+  UINT32  Off;
+
+  for (Off = 0; Off < 0x1000; Off += 16) {
+    LogQuiet (L"  phy %03x: %08x %08x %08x %08x\r\n", Off, MmioRead32 (PHY_BASE + Off),
+              MmioRead32 (PHY_BASE + Off + 4), MmioRead32 (PHY_BASE + Off + 8), MmioRead32 (PHY_BASE + Off + 12));
+  }
+}
+
+/**
+  Start the QMP PHY.  Several variants are tried in one boot, because the exact sequence the
+  downstream kernel uses is not known to be sufficient on its own:
+    A  pipe clock first (mainline enables it before the PHY starts), then the table
+    B  A after a PHY reset pulse
+    C  B with the controller and both "nocsr" resets pulsed as well
+**/
+STATIC
+BOOLEAN
+PhyStart (
+  VOID
+  )
+{
+  INT32  Ms;
+  UINT32 Attempt;
+
+  GCC_W (GCC_APCS_CLK_VOTE, GCC_R (GCC_APCS_CLK_VOTE) | BIT4);      // pipe clock branch (source is the PHY)
+
+  for (Attempt = 0; Attempt < 3; Attempt++) {
+    if (Attempt >= 1) {
+      ResetBcr (GCC_PCIE0_PHY_BCR, TRUE);
+      if (Attempt == 2) {
+        ResetBcr (GCC_PCIE0_BCR, TRUE);
+        ResetBcr (GCC_PCIE0_NOCSR_BCR, TRUE);
+        ResetBcr (GCC_PCIE0_PHY_NOCSR_BCR, TRUE);
+      }
+      MicroSecondDelay (1000);
+      if (Attempt == 2) {
+        ResetBcr (GCC_PCIE0_PHY_NOCSR_BCR, FALSE);
+        ResetBcr (GCC_PCIE0_NOCSR_BCR, FALSE);
+        ResetBcr (GCC_PCIE0_BCR, FALSE);
+      }
+      ResetBcr (GCC_PCIE0_PHY_BCR, FALSE);
+      MicroSecondDelay (2500);
+      ParfInit ();
+    }
+    PhyApply ();
+    Ms = PhyWaitReady (100);
+    Log (L"  phy %c: %a (status %08x pcs 800 %08x 840 %08x 844 %08x)\r\n", L'A' + Attempt,
+         (Ms >= 0) ? "READY" : "not ready", MmioRead32 (PHY_BASE + PHY_STATUS),
+         MmioRead32 (PHY_BASE + 0x800), MmioRead32 (PHY_BASE + 0x840), MmioRead32 (PHY_BASE + 0x844));
+    if (Ms >= 0) {
+      return TRUE;
+    }
+  }
+  PhyDump ();
+  return FALSE;
 }
 
 /** Root port configuration through the DBI (dw_pcie_setup_rc). **/
@@ -1014,9 +1086,7 @@ BringUp (
   // Pulse the controller and PHY resets with the clocks running (as the Linux driver does).
   ResetBcr (GCC_PCIE0_BCR, TRUE);
   ResetBcr (GCC_PCIE0_PHY_BCR, TRUE);
-  ResetBcr (GCC_PCIE0_NOCSR_BCR, TRUE);
   MicroSecondDelay (1000);
-  ResetBcr (GCC_PCIE0_NOCSR_BCR, FALSE);
   ResetBcr (GCC_PCIE0_PHY_BCR, FALSE);
   ResetBcr (GCC_PCIE0_BCR, FALSE);
   MicroSecondDelay (2500);
@@ -1026,11 +1096,10 @@ BringUp (
   STEP (L"4 parf+phy\r\n");
   Log (L"  parf sys_ctrl before: %08x\r\n", PARF_R (PARF_SYS_CTRL));
   ParfInit ();
-  if (!PhyInit ()) {
+  if (!PhyStart ()) {
     LogFlush ();
     return;
   }
-  GCC_W (GCC_APCS_CLK_VOTE, GCC_R (GCC_APCS_CLK_VOTE) | BIT4);      // pipe clock (from the PHY)
   MicroSecondDelay (1000);
   Log (L"  pipe cbcr %08x\r\n", GCC_R (GCC_PCIE0_PIPE_CBCR));
 

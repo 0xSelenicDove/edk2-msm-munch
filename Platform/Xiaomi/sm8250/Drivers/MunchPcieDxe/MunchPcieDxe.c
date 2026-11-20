@@ -1133,6 +1133,45 @@ Probe (
 }
 
 /**
+  Chip identification registers (ath11k names): TCSR_SOC_HW_VERSION at BAR+0x224 (major bits 11:8,
+  minor 7:0), PCIE_SOC_GLOBAL_RESET 0x3008, the BAR window select 0x310C, the MHI/BHI blocks, and
+  the whole endpoint config space (capability list: is the MSI capability there?).
+**/
+STATIC
+VOID
+ChipInfo (
+  IN UINT32  Bar
+  )
+{
+  UINT32  Off;
+  UINT32  V;
+
+  LogFlush ();
+  V = MmioRead32 (Bar + 0x224);
+  Log (L"  SOC_HW_VERSION @0x224 = %08x (major %u minor %u)\r\n", V, (V >> 8) & 0xF, V & 0xFF);
+  LogFlush ();
+  Log (L"  GLOBAL_RESET @0x3008 = %08x  WINDOW @0x310c = %08x\r\n", MmioRead32 (Bar + 0x3008), MmioRead32 (Bar + 0x310C));
+  LogFlush ();
+  for (Off = 0; Off < 0x80; Off += 16) {
+    LogQuiet (L"  bar %03x: %08x %08x %08x %08x\r\n", Off, MmioRead32 (Bar + Off), MmioRead32 (Bar + Off + 4),
+              MmioRead32 (Bar + Off + 8), MmioRead32 (Bar + Off + 12));
+  }
+  LogFlush ();
+  for (Off = 0x200; Off < 0x280; Off += 16) {
+    LogQuiet (L"  bar %03x: %08x %08x %08x %08x\r\n", Off, MmioRead32 (Bar + Off), MmioRead32 (Bar + Off + 4),
+              MmioRead32 (Bar + Off + 8), MmioRead32 (Bar + Off + 12));
+  }
+  LogFlush ();
+  // Endpoint config space, standard 256 bytes then the extended part (via the 1 MB ECAM window).
+  for (Off = 0; Off < 0x400; Off += 16) {
+    LogQuiet (L"  cfg %03x: %08x %08x %08x %08x\r\n", Off, MmioRead32 (CONF_BASE + Off), MmioRead32 (CONF_BASE + Off + 4),
+              MmioRead32 (CONF_BASE + Off + 8), MmioRead32 (CONF_BASE + Off + 12));
+  }
+  Log (L"  cap ptr %02x  (config dump is in the log file)\r\n", MmioRead32 (CONF_BASE + 0x34) & 0xFF);
+  LogFlush ();
+}
+
+/**
   Prove that memory accesses reach the endpoint: size BAR0, place it at the start of the MEM window,
   enable memory decoding and read the first MHI registers.  A working path returns real values
   (MHI version 0x01000000 at +8); all-ones means the window/iATU setup is wrong.
@@ -1169,6 +1208,7 @@ BarProbe (
   Log (L"    mhi regs: %08x %08x %08x %08x %08x %08x %08x %08x\r\n", V[0], V[1], V[2], V[3], V[4], V[5], V[6], V[7]);
   Log (L"    status +48 %08x  +4c %08x\r\n", MmioRead32 (MEM_BASE + 0x100000U + 0x48),
        MmioRead32 (MEM_BASE + 0x100000U + 0x4C));
+  ChipInfo (MEM_BASE + 0x100000U);
 }
 
 STATIC

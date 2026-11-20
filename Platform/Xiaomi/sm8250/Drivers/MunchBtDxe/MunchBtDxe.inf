@@ -1,0 +1,30 @@
+[Defines]
+  INF_VERSION                    = 0x0001001B
+  BASE_NAME                      = MunchBtDxe
+  FILE_GUID                      = 8B3F61D4-2A97-4C05-9E1B-D7640A5C3E82
+  MODULE_TYPE                    = DXE_DRIVER
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = MunchBtDxeEntryPoint
+
+[Sources]
+  MunchBtDxe.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+
+[LibraryClasses]
+  BaseLib
+  BaseMemoryLib
+  DebugLib
+  IoLib
+  PrintLib
+  TimerLib
+  UefiBootServicesTableLib
+  UefiDriverEntryPoint
+  UefiLib
+
+[Guids]
+  gEfiEventReadyToBootGuid
+
+[Depex]
+  TRUE

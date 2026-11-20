@@ -120,3 +120,31 @@ driver install, and moving the code out of the test-style "hold the screen 20 s"
   window-based registers from firmware and compare with ath11k's QCA6390 table), missing platform
   data the Qualcomm laptops provide (ACPI companion device / `_DSD` under RP1, PEP-provided
   resources), or WDI/NDIS expectations of this Windows build.
+
+## Wi-Fi driver, round 3 (companion node, driver-store damage)
+
+* **ACPI companion works but changes nothing.** `RP1.WLN0` (`_ADR 0`, no `_DEP`) attaches
+  (`DEVPKEY_Device_BiosDeviceName = \_SB.PCI0.RP1.WLN0`, location path includes the ACPI node). The
+  driver has no ACPI property reads (strings: registry keys only), and 1.0.2000 still crashes with the
+  companion present.
+* **Crash is common to every build from 1.0.2000 (July 2023) to 1.0.2160**: access violation at
+  `qcwlan.sys` RVA 0x1b5018 (2000) / 0x1b6580 (2140, 2160), always the load of `[global + 0xa7c4]` in the
+  chip register read helper (BAR window select at BAR+0x310C, ath11k-style). The global context
+  pointer is **set inside `MiniportInitializeEx`** after the adapter allocation (RVA 0x2c594 in 2160)
+  and **cleared in the halt/teardown path** (0x2a8f0). So a later initialization step fails, teardown
+  runs, and a worker thread still reads registers. NDIS logs event 5006 ("version number is incorrect",
+  `NDIS_STATUS_BAD_VERSION`) for the failed initialize. The failing step was not identified (the
+  status is not built in the driver; it comes back from a lower layer).
+* **Do not run `fsck.ntfs -d` / `ntfsfix -d` after every blue screen.** It clears the NTFS `$LogFile`,
+  discarding Windows' last uncommitted metadata. After several crashed installs this left: a driver
+  package registered in the DRIVERS hive with an empty `DriverStore\FileRepository` folder
+  (`pnputil /add-driver` then fails with "The system cannot find the file specified"), a package on disk
+  without a registry entry, files that Windows had copied rolled back, `Get-WindowsDriver` reporting
+  "configuration registry database is corrupt", and a dirty DRIVERS hive (sequence numbers 63/62).
+  Repair that worked: set the hive's secondary sequence number equal to the primary and fix the header
+  checksum (2 bytes), keeping the original. Prefer read-only mounts (`mount.ntfs -o ro`) for reading
+  logs/dumps; only mount read-write when files must be written.
+* **State left in Windows (slot B):** driver packages `qcwlan6800sc8180.inf_arm64_3de23d1344b59ad5`
+  (2140 files) and `..._66e78231ad6de634` (empty) in the driver store, `C:\munch-wlan*`
+  folders, CrashControl = small dump / no auto-reboot, SYSTEM and DRIVERS hives dirty after the last
+  crash (Windows replays its logs at the next boot).

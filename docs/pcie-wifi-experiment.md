@@ -73,3 +73,35 @@ driver install, and moving the code out of the test-style "hold the screen 20 s"
    `_OSC` denying ASPM), IO window, check the MADT MSI frame range vs the SPIs RC0 uses.
 3. Windows: install `qcwlan6800sc8180` (Windows Update / WOA-Project Qualcomm-Reference-Drivers 8180_CLS);
    check whether it starts without the PEP; look at DMA/SMMU (IORT) if it does not.
+
+## Windows side (2026-11-19, CI 406018e and 55b8ec1)
+
+* **ACPI/enumeration works.** MCFG + `PCI0` (no `_DEP`) make Windows start `ACPI\PNP0A08`; with the root
+  port BARs disabled via ELBI CS2 (`ELBI+0xA4`, BAR regs = size masks, write 0) the root port
+  (17CB:010B) starts and Windows enumerates `PCI\VEN_17CB&DEV_1101&SUBSYS_010817CB&REV_01`.
+  Before the CS2 fix the root port failed with CM_PROB_NORMAL_CONFLICT (0xC0000018).
+* **ECAM safety:** PARF ECAM base 0x380 + two blocker windows (0x360-0x378 and 0x398-0x3B0, `SYS_CTRL`
+  bits 26 and 30) make every address Windows probes while enumerating return FFFFFFFF; no hangs. The
+  unrolled iATU registers (0x60001000) sit inside the root-bus blocker, so program the iATU first.
+* **MMIO works.** Firmware probe: BAR0 is 1 MB 64-bit; placed at 0x60400000 the MHI registers read real
+  values (MHIREGLEN 0x100, MHICFG 0x00800080, CHDBOFF 0x300; MHIVER slot reads DEADBEEF = chip not
+  booted yet). So the iATU MEM window and the link are fine.
+* **Driver `qcwlan6800sc8180` (WOA-Project Qualcomm-Reference-Drivers 8180_CLS, proprietary, not in repo):**
+  * 1.0.1860 (200.0.80.0, 2022): binds, loads, `StartDevice` fails (Problem 10, 0xC0000001); the driver
+    logs NDIS event 5006 "The version number is incorrect for this driver".
+  * 1.0.2140 (200.0.112.0) and 1.0.2160 (200.0.117.0): bugcheck 0x7E / 0x50, access violation inside
+    `qcwlan.sys` at RVA 0x1b6580 (first instruction of the BAR window-select helper called from
+    `read32`, i.e. a read of the driver's global context pointer), reached from `+0x1b64e8` and
+    `+0x1b35a4` (a 256 KB table fill in a function at `+0x1b3370`). Looks like a register read from a
+    worker thread after the device start already failed (global context gone), not a bad BAR.
+  * Same early failure in all builds is likely: something in start-up rejects the chip/platform
+    (version check) before the crash. The SoC HW version (BAR+0x224) is read by `+0x1ad970`
+    and stored at ctx+0xca10/0xca14; the code that rejects it was not found.
+* **Reading crash dumps without Windows:** with CrashDumpEnabled=3 the small dump stays at offset 0
+  of `pagefile.sys` until the next Windows boot (`PAGEDU64`). `.dl/wlan-drv/parse_dump.py` parses it
+  (triage header offsets are absolute; driver list stride 0x90, DllBase at +0x38; name pool 8-byte
+  aligned). Disassemble the driver with Apple `objdump -d` (coff-arm64).
+* **Open:** why start-up rejects the chip; candidates are the chip version (read BAR+0x224 and the
+  window-based registers from firmware and compare with ath11k's QCA6390 table), missing platform
+  data the Qualcomm laptops provide (ACPI companion device / `_DSD` under RP1, PEP-provided
+  resources), or WDI/NDIS expectations of this Windows build.

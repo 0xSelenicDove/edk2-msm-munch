@@ -32,5 +32,8 @@ INF Platform/Xiaomi/sm8250/Drivers/MunchUsbDxe/MunchUsbDxe.inf
 // Touch bring-up probe (read-only).
 INF Platform/Xiaomi/sm8250/Drivers/MunchTouchDxe/MunchTouchDxe.inf
 
+// PCIe RC0 bring-up experiment: power the QCA6390, train the link, print its PCI ID (see MunchPcieDxe.c).
+INF Platform/Xiaomi/sm8250/Drivers/MunchPcieDxe/MunchPcieDxe.inf
+
 // Real date/time from the PMIC RTC counter plus an offset kept on the ESP.
 INF Platform/Xiaomi/sm8250/Drivers/MunchClockDxe/MunchClockDxe.inf

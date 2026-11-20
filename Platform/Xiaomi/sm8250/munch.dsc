@@ -40,4 +40,5 @@
   Platform/Xiaomi/sm8250/Drivers/MunchButtonsDxe/MunchButtonsDxe.inf
   Platform/Xiaomi/sm8250/Drivers/MunchUsbDxe/MunchUsbDxe.inf
   Platform/Xiaomi/sm8250/Drivers/MunchTouchDxe/MunchTouchDxe.inf
+  Platform/Xiaomi/sm8250/Drivers/MunchPcieDxe/MunchPcieDxe.inf
   Platform/Xiaomi/sm8250/Drivers/MunchClockDxe/MunchClockDxe.inf

@@ -37,6 +37,11 @@
 #include <Protocol/SimpleFileSystem.h>
 #include <Protocol/SimpleTextOut.h>
 
+// The BAR probe places BAR0 and enables memory/bus-master on the endpoint.  It is a debugging aid:
+// leaving the endpoint enabled stalled the Windows boot (spinner forever), so it is off by default
+// and restores the endpoint when it is on.
+#define MUNCH_PCIE_BAR_PROBE FALSE
+
 // Seconds the boot screen is held so the log can be read.
 #define MUNCH_PCIE_HOLD_US   8000000U
 #define MUNCH_PCIE_LOG_FILE  L"munch-pcie.log"
@@ -1209,6 +1214,12 @@ BarProbe (
   Log (L"    status +48 %08x  +4c %08x\r\n", MmioRead32 (MEM_BASE + 0x100000U + 0x48),
        MmioRead32 (MEM_BASE + 0x100000U + 0x4C));
   ChipInfo (MEM_BASE + 0x100000U);
+
+  // Hand the endpoint over exactly as found: decoding off, BAR cleared.
+  MmioWrite32 (CONF_BASE + 0x04, MmioRead32 (CONF_BASE + 0x04) & 0xFFF8U & 0xFFFFU);
+  MmioWrite32 (CONF_BASE + 0x10, 0);
+  MmioWrite32 (CONF_BASE + 0x14, 0);
+  Log (L"  endpoint restored: cmd %08x bar0 %08x\r\n", MmioRead32 (CONF_BASE + 0x04), MmioRead32 (CONF_BASE + 0x10));
 }
 
 STATIC
@@ -1328,7 +1339,9 @@ BringUp (
   Probe (L"bus1 dev1", CONF_BASE + 0x8000U);
   Probe (L"bus1 dev31", CONF_BASE + 0xF8000U);
   Probe (L"rp 00:00.0 again", DBI_BASE);
-  BarProbe ();
+  if (MUNCH_PCIE_BAR_PROBE) {
+    BarProbe ();
+  }
   Log (L"MunchPcie: %a\r\n", (Id == 0x110117CBU) ? "QCA6390 FOUND" : "unexpected ID");
   LogFlush ();
 }

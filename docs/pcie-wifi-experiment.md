@@ -101,6 +101,21 @@ driver install, and moving the code out of the test-style "hold the screen 20 s"
   of `pagefile.sys` until the next Windows boot (`PAGEDU64`). `.dl/wlan-drv/parse_dump.py` parses it
   (triage header offsets are absolute; driver list stride 0x90, DllBase at +0x38; name pool 8-byte
   aligned). Disassemble the driver with Apple `objdump -d` (coff-arm64).
+* **Chip identity (firmware probe, 65963b7):** `SOC_HW_VERSION` (BAR+0x224) = `0x400A0200`, i.e.
+  major 2 / minor 0 = QCA6390 v2.0, the version `wlanfw20.mbn` targets. `PCIE_SOC_GLOBAL_RESET`
+  (0x3008) = 4, BAR window select (0x310C) = 0x40000000 (window enabled, window 0). Endpoint config
+  space is normal: PM cap @40, MSI cap @50 (32 vectors, 32-bit address, per-vector mask), PCIe cap @70
+  (Gen2 x1, ASPM L0s+L1 supported, ASPM control off), extended caps AER (0x100), 0x19 (0x148), 0x17
+  (0x158). Subsystem 17CB:0108, class 02:80, rev 01. The same 5006 ("version number is incorrect")
+  event is logged by 1.0.2140 right before its crash, so all builds reject something at start-up.
+* **Firmware leftovers can stall the Windows boot.** The BAR probe leaves BAR0 assigned and memory +
+  bus-master enabled on the endpoint; Windows then hung at the spinner forever (and once before on a
+  first boot). The build without the probe (406018e) booted every time. The probe is now behind
+  `MUNCH_PCIE_BAR_PROBE` (off) and restores BAR0/command when enabled. Keep the endpoint exactly as
+  found (decode off, BAR 0) when handing over to Windows.
+* **Windows disables a driver after it blames it for a crash**: `Services\qcwlan\Start` was already 4.
+  A crash during install can also leave a truncated `drivers\qcwlan6800sc81.sys` (2 MB) that NTFS-3G
+  cannot remove (I/O error).
 * **Open:** why start-up rejects the chip; candidates are the chip version (read BAR+0x224 and the
   window-based registers from firmware and compare with ath11k's QCA6390 table), missing platform
   data the Qualcomm laptops provide (ACPI companion device / `_DSD` under RP1, PEP-provided

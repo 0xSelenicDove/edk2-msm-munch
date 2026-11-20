@@ -149,7 +149,12 @@ bcdedit /store BCD /set {default} bootstatuspolicy IgnoreAllFailures
 | **USB-C power (VBUS/OTG)** | 🟢 **Working** | `MunchOtgDxe` enables the PM8150B OTG boost |
 | **USB-C device mode / role switching** | 🔴 **Not working** | Needs the Type-C manager and a real PEP (see below) |
 | **Touchscreen** | 🟢 **Working** | FocalTech FTS on SPI (QUP SE4). Firmware `MunchTouchDxe` + ACPI `MFTS0001` + Windows driver `munchfts` (VHF touchscreen). The outermost ~25 px at the top edge are hard to reach; no sleep/resume support yet |
-| **GPU / Wi-Fi / Bluetooth / Audio / Battery / Cellular** | ⚪ **Not started** | Need ACPI nodes and drivers that are not present yet |
+| **Date and time** | 🟢 **Working** | `MunchClockDxe` sets the clock from the PMIC RTC counter plus an offset kept on the ESP (`\EFI\munch\clock.txt`); `tools/windows/munch-clock-sync.ps1` keeps that offset current from Windows |
+| **Wi-Fi** | 🟡 **Research** | QCA6390 on PCIe. Link-up and chip ID proven in firmware on a branch; the Windows side (ACPI + driver) is not done |
+| **Bluetooth** | 🟡 **Research** | Same QCA6390 over UART; the Windows driver depends on the PEP |
+| **Battery level / charging in Windows** | 🟠 **Planned** | Fuel gauge is an external I2C chip; Windows has no driver for it yet. Charging itself should work in hardware |
+| **Cellular** | 🔴 **Hard** | External SDX55 modem over PCIe/MHI; Windows' cellular stack expects an integrated modem. Use a USB tether or Ethernet adapter meanwhile |
+| **GPU / Audio / Sensors / Camera** | ⚪ **Not started** | Need ACPI nodes and drivers that are not present yet |
 
 ### How USB host was made to work
 * The bootloader leaves the USB controller powered, with most clocks running, but in **device mode** and with `mock_utmi_clk` off. Qualcomm's own USB bring-up driver (`UsbConfigDxe`) never runs on this platform because it waits for a protocol nothing provides.
@@ -171,6 +176,17 @@ There is no working PEP on this platform, so Qualcomm's SPI/GPIO drivers cannot 
 The remaining reason for the fake PEP is unchanged: Qualcomm's closed `PmicDxe` (taken from a different product) asserts and bootloops on munch, so it stays disabled; keys are read directly by `MunchButtonsDxe` instead.
 
 See [docs/touch-usb-investigation.md](docs/touch-usb-investigation.md) for the investigation notes.
+
+---
+
+## 🙋 Help wanted
+
+This port is a one-person effort on one phone, and every piece so far (USB host, touch, clock) came from reading the Linux device tree and writing a small firmware driver plus a Windows driver. If you have a POCO F4 / Redmi K40S, you can help even without coding:
+
+* **Try it and report back.** Open a [device test report](https://github.com/0xSelenicDove/edk2-msm-munch/issues/new?template=device-test-report.yml): which phone variant, which build, what worked and what did not.
+* **Pick an open piece:** the battery gauge driver, Wi-Fi/Bluetooth in Windows, touch edge calibration and sleep/resume, the shutdown `INTERNAL_POWER_ERROR`, audio. Issues labelled `help wanted` say where to start.
+* See [CONTRIBUTING.md](CONTRIBUTING.md) for how builds, device testing and the A/B slot flow work. CI builds the firmware, so you do not need a local EDK2 toolchain.
+* Related project: [woa-installer](https://github.com/0xSelenicDove/woa-installer), the one-click dual-boot installer.
 
 ---
 

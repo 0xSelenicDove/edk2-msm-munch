@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Install with woa-installer
+    url: https://github.com/0xSelenicDove/woa-installer
+    about: The one-click dual-boot installer has its own issue tracker.

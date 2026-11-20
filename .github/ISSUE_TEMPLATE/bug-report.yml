@@ -1,0 +1,24 @@
+name: Bug report
+description: Something broke on the munch firmware or the Windows driver
+labels: ["bug"]
+body:
+  - type: input
+    id: build
+    attributes:
+      label: Firmware build (release tag or commit)
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+  - type: textarea
+    id: logs
+    attributes:
+      label: Screen text, photos or logs

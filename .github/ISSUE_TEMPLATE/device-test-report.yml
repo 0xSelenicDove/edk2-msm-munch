@@ -1,0 +1,46 @@
+name: Device test report
+description: Tell us how a build behaved on your POCO F4 / Redmi K40S
+labels: ["test-report"]
+body:
+  - type: input
+    id: device
+    attributes:
+      label: Phone
+      description: Model, region and RAM (for example POCO F4 8/256 Global, Redmi K40S 12/256 CN)
+    validations:
+      required: true
+  - type: input
+    id: build
+    attributes:
+      label: Firmware build
+      description: Release tag or commit (for example munch-uefi-1afbada)
+    validations:
+      required: true
+  - type: input
+    id: android
+    attributes:
+      label: Android ROM and root method
+      description: For example HyperOS 1.0 + Magisk 27
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install?
+      options:
+        - woa-installer
+        - Manual steps from the README
+        - Other
+  - type: checkboxes
+    id: works
+    attributes:
+      label: What worked
+      options:
+        - label: UEFI splash and boot menu
+        - label: Windows reached the desktop
+        - label: USB mouse / keyboard
+        - label: Touchscreen (munchfts driver installed)
+        - label: Switching back to Android
+  - type: textarea
+    id: details
+    attributes:
+      label: What did not work, and anything else
+      description: Photos or a short video of the boot screen help a lot. Windows logs are in C:\munch-diag and C:\Windows\Temp\munchfts.log if present.

@@ -285,6 +285,7 @@ STATIC UINT32          mTcs = 0xFFFFFFFFU;
 #define DBI_MISC_CTRL_1         0x8BCU           // bit 0 DBI read-only write enable
 
 #define ELBI_SYS_STTS           0x008U           // bit 10 XMLH_LINK_UP
+#define ELBI_CS2_ENABLE         0x0A4U           // 1: DBI writes go to the shadow (CS2) registers, e.g. BAR masks
 
 // Unrolled iATU: outbound region N at IATU_BASE + N * 0x200
 #define ATU_CTRL1               0x00U
@@ -970,13 +971,45 @@ RootPortInit (
   V = DBI_R (DBI_CLASS_REV);
   DBI_W (DBI_CLASS_REV, (V & 0xFFFFU) | (0x0604U << 16));
 
-  DBI_W (0x10, 0);                                                  // no BARs
+  // Disable the root port's own BARs: with CS2 enabled the BAR registers are the size masks, and
+  // 0 makes the BAR read as 0 when the OS sizes it.  (Without this Windows sees a BAR it has no
+  // room for and the root port fails to start: CM_PROB_NORMAL_CONFLICT / 0xC0000018.)
+  MmioWrite32 (ELBI_BASE + ELBI_CS2_ENABLE, 1);
+  DBI_W (0x10, 0);
+  DBI_W (0x14, 0);
+  MmioWrite32 (ELBI_BASE + ELBI_CS2_ENABLE, 0);
+  DBI_W (0x10, 0);
   DBI_W (0x14, 0);
   DBI_W (DBI_BUSNUM, 0x00FF0100U);                                  // primary 0, secondary 1, subordinate 255
   DBI_W (DBI_MEMORY_BASE, (((MEM_LAST >> 16) & 0xFFF0U) << 16) | ((MEM_BASE >> 16) & 0xFFF0U));
   DBI_W (DBI_COMMAND, (DBI_R (DBI_COMMAND) & ~0xFFFFU) | BIT1 | BIT2);   // memory space + bus master
 
   DBI_W (DBI_MISC_CTRL_1, DBI_R (DBI_MISC_CTRL_1) & ~(UINT32)BIT0);
+}
+
+/** Log what the OS will see in the root port's type-1 header, including what BAR sizing returns. **/
+STATIC
+VOID
+RootPortDump (
+  IN CONST CHAR16  *Title
+  )
+{
+  UINT32  B0;
+  UINT32  B1;
+
+  Log (L"  %s:\r\n", Title);
+  Log (L"    04 %08x 08 %08x 0c %08x 10 %08x 14 %08x 18 %08x\r\n", DBI_R (0x04), DBI_R (0x08), DBI_R (0x0C),
+       DBI_R (0x10), DBI_R (0x14), DBI_R (0x18));
+  Log (L"    1c %08x 20 %08x 24 %08x 28 %08x 2c %08x 30 %08x 3c %08x\r\n", DBI_R (0x1C), DBI_R (0x20),
+       DBI_R (0x24), DBI_R (0x28), DBI_R (0x2C), DBI_R (0x30), DBI_R (0x3C));
+  // BAR sizing exactly as an OS does it, then restore.
+  DBI_W (0x10, 0xFFFFFFFFU);
+  DBI_W (0x14, 0xFFFFFFFFU);
+  B0 = DBI_R (0x10);
+  B1 = DBI_R (0x14);
+  DBI_W (0x10, 0);
+  DBI_W (0x14, 0);
+  Log (L"    bar sizing: bar0 %08x bar1 %08x\r\n", B0, B1);
 }
 
 STATIC
@@ -1185,6 +1218,7 @@ BringUp (
   STEP (L"6 link\r\n");
   Log (L"  dbi id %08x class %08x lnkcap %08x\r\n", DBI_R (0), DBI_R (DBI_CLASS_REV), DBI_R (DBI_LNKCAP));
   RootPortInit ();
+  RootPortDump (L"rp header after init");
   Up = LinkTrain ();
   LinkStatus (&State, &Up);
   LogFlush ();

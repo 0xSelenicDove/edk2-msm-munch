@@ -106,5 +106,14 @@ Device (PCI0) {
   Device (RP1) {
     Name (_ADR, 0x00000000)
     Name (_S0W, 0)
+
+    // ACPI companion of the QCA6390 Wi-Fi endpoint (bus 1, device 0, function 0).  Qualcomm's
+    // Windows-on-ARM laptop firmware describes the Wi-Fi device under its root port; the driver
+    // may expect an ACPI companion (experiment: nothing in the driver reads ACPI properties).
+    // Deliberately no _DEP, no power resources and no _PRW: nothing here may need the PEP.
+    Device (WLN0) {
+      Name (_ADR, 0x00000000)
+      Name (_S0W, 0)
+    }
   }
 }

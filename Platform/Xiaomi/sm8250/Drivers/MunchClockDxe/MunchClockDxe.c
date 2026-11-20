@@ -55,6 +55,8 @@
 #define RTC_READ                  0x6048U     // 4 bytes, little endian, LSB read first
 
 #define CLOCK_FILE                L"\\EFI\\munch\\clock.txt"
+#define RTC_FILE                  L"\\EFI\\munch\\rtc.txt"
+#define MUNCH_DIR                 L"\\EFI\\munch"
 
 STATIC EFI_GUID  mMunchRtcGuid = { 0x4a1d8b3c, 0x6e52, 0x47f0, { 0x9c, 0x3a, 0x71, 0xe0, 0x5b, 0x28, 0xd4, 0x16 } };
 
@@ -307,6 +309,88 @@ ReadClockFile (
   return Ok;
 }
 
+/**
+  Windows cannot read firmware variables on this port (GetFirmwareEnvironmentVariable
+  fails with error 87), so also leave the counter we read in \EFI\munch\rtc.txt on the
+  EFI system partition (the volume that has \EFI). munch-clock-sync.ps1 reads it there.
+**/
+STATIC
+VOID
+WriteRtcFile (
+  IN UINT32  Pmic
+  )
+{
+  EFI_HANDLE                       *Handles;
+  UINTN                            Count;
+  UINTN                            I;
+  EFI_SIMPLE_FILE_SYSTEM_PROTOCOL  *Fs;
+  EFI_FILE_PROTOCOL                *Root;
+  EFI_FILE_PROTOCOL                *Dir;
+  EFI_FILE_PROTOCOL                *File;
+  CHAR8                            Text[24];
+  UINTN                            Len;
+  UINT32                           V;
+  UINTN                            N;
+  CHAR8                            Rev[12];
+  EFI_STATUS                       Status;
+  BOOLEAN                          Done;
+
+  // decimal text of Pmic + CRLF
+  N = 0;
+  V = Pmic;
+  do {
+    Rev[N++] = (CHAR8)('0' + (V % 10));
+    V       /= 10;
+  } while (V != 0);
+  Len = 0;
+  while (N > 0) {
+    Text[Len++] = Rev[--N];
+  }
+  Text[Len++] = '\r';
+  Text[Len++] = '\n';
+
+  Done    = FALSE;
+  Handles = NULL;
+  if (EFI_ERROR (gBS->LocateHandleBuffer (ByProtocol, &gEfiSimpleFileSystemProtocolGuid, NULL, &Count, &Handles))) {
+    return;
+  }
+
+  for (I = 0; (I < Count) && !Done; I++) {
+    if (EFI_ERROR (gBS->HandleProtocol (Handles[I], &gEfiSimpleFileSystemProtocolGuid, (VOID **)&Fs)) ||
+        EFI_ERROR (Fs->OpenVolume (Fs, &Root))) {
+      continue;
+    }
+
+    // only the EFI system partition (has \EFI); create \EFI\munch if needed
+    if (!EFI_ERROR (Root->Open (Root, &Dir, L"\\EFI", EFI_FILE_MODE_READ, 0))) {
+      Dir->Close (Dir);
+      if (!EFI_ERROR (Root->Open (Root, &Dir, MUNCH_DIR, EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE | EFI_FILE_MODE_CREATE,
+                                  EFI_FILE_DIRECTORY))) {
+        Dir->Close (Dir);
+      }
+      if (!EFI_ERROR (Root->Open (Root, &File, RTC_FILE, EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE, 0))) {
+        File->Delete (File);   // closes the handle too
+      }
+      Status = Root->Open (Root, &File, RTC_FILE, EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE | EFI_FILE_MODE_CREATE, 0);
+      if (!EFI_ERROR (Status)) {
+        N      = Len;
+        Status = File->Write (File, &N, Text);
+        if (!EFI_ERROR (Status)) {
+          File->Flush (File);
+          Done = TRUE;
+        }
+        File->Close (File);
+      }
+      Print (L"Clock: rtc.txt %r\r\n", Status);
+    }
+    Root->Close (Root);
+  }
+
+  if (Handles != NULL) {
+    FreePool (Handles);
+  }
+}
+
 STATIC
 VOID
 EFIAPI
@@ -336,6 +420,7 @@ MunchClockReadyToBoot (
   Info.Frequency   = GetPerformanceCounterProperties (NULL, NULL);
   gRT->SetVariable (L"MunchRtc", &mMunchRtcGuid, EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS,
                     sizeof (Info), &Info);
+  WriteRtcFile (Pmic);
 
   Offset   = 0;
   Tz       = 0;

@@ -1,5 +1,7 @@
 # EDK2 UEFI Firmware for Xiaomi POCO F4 / Redmi K40S (`munch`)
 
+**English** | [简体中文](README.zh-CN.md)
+
 <div align="center">
 
 ![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/0xSelenicDove/edk2-msm-munch/build-munch.yml?branch=master&label=Build%20UEFI)

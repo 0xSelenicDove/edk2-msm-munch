@@ -4,7 +4,7 @@ Goal of step 1: prove that our firmware can power the QCA6390 Wi-Fi/BT chip, tra
 complex 0 and read the endpoint's ID (expect `17CB:1101`), with no Windows involved.
 Background and register sources: `.dl/notes/wifi.md` (local, git-excluded).
 
-**Status: written and syntax-checked only. Not built with EDK2, not run on the phone.**
+**Status: step 1 done on the phone (2026-11-19, CI `bc56775`): the link trains and the endpoint answers 17CB:1101.**
 
 ## What the driver does (`Platform/Xiaomi/sm8250/Drivers/MunchPcieDxe`)
 
@@ -50,3 +50,26 @@ the first time.
 
 ACPI (MCFG, `PCI0` node without `_DEP`, MADT MSI frame check), IO window, ASPM policy, Windows
 driver install, and moving the code out of the test-style "hold the screen 20 s" behaviour.
+
+## Result (run 2, commit bc56775, saved log `.dl/pcie-ci2/run2.log`)
+
+* Run 1 (commit 4cf7f66) stopped at "phy NOT ready (status 0x69)": rails, BCM votes, GDSC, clocks and
+  PARF access were all fine, but the QMP PLL never locked.
+* **Fix: enable the pipe clock branch (GCC vote bit 4) before applying the PHY table**, as mainline does.
+  Variant A of the start ladder then reports READY at once (status 0xA6, bit 6 clear). B and C were not needed.
+* Link: LTSSM 00 -> 0x11 (L0) within 1 ms of enabling it, `link UP`, **Gen2 x1** (LNKCAP says Gen3 capable;
+  the speed was not pushed up). DLLLA set, `lnksta B0120008`.
+* Endpoint 01:00.0: vendor/device **17CB:1101**, **subsystem 17CB:0108** (this is in the arm64
+  `qcwlan6800sc8180.inf` hardware ID list, so no INF edit should be needed), class 02:80:00 (network,
+  other), rev 01, BAR0 = 64-bit memory (unassigned, Windows/ACPI will place it in `0x60300000..0x63FFFFFF`).
+* cmd-db has 135 entries; the full list is in the log file (BCM names CN0/SN6/SN9/SN12 and the VRM names
+  used all exist). `qphy.lvl`, `cx.lvl` etc. exist as ARC resources but were not needed.
+* Windows booted normally afterwards (the driver leaves the chip powered and the link up).
+
+## Next
+
+1. Remove the ladder (keep variant A), drop the 20 s hold and the verbose output (touch-driver style).
+2. ACPI: MCFG (`0x60000000`, seg 0, bus 0-1) + `PCI0` node (`PNP0A08`, no `_DEP`, no power resources,
+   `_OSC` denying ASPM), IO window, check the MADT MSI frame range vs the SPIs RC0 uses.
+3. Windows: install `qcwlan6800sc8180` (Windows Update / WOA-Project Qualcomm-Reference-Drivers 8180_CLS);
+   check whether it starts without the PEP; look at DMA/SMMU (IORT) if it does not.

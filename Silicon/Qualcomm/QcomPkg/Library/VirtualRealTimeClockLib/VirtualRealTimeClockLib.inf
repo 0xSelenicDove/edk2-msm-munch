@@ -36,7 +36,8 @@
   IoLib
   DebugLib
   TimerLib
-  HobLib
+  BaseLib
+  BaseMemoryLib
   PcdLib
 
 [FixedPcd]

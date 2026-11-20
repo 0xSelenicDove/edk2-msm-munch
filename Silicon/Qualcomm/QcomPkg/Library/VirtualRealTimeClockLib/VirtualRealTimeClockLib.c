@@ -1,6 +1,12 @@
 /** @file
  *
- *  Implement dummy EFI RealTimeClock runtime services.
+ *  Software EFI RealTimeClock for platforms without a usable hardware RTC.
+ *
+ *  The time is kept as "base time + ARM generic timer ticks since it was set".
+ *  It starts at the firmware build date; a platform driver (for example
+ *  MunchClockDxe, which reads the PMIC RTC counter) sets the real time during boot
+ *  through SetTime(), and the OS may call SetTime() too.  Nothing is stored in
+ *  hardware: the value only lives until the next reset.
  *
  *  Copyright (c), 2018, Andrei Warkentin <andrey.warkentin@gmail.com>
  *  Copyright (c) Microsoft Corporation. All rights reserved.
@@ -20,195 +26,208 @@
 
 #include <Library/ArmGenericTimerCounterLib.h>
 #include <Library/BaseLib.h>
+#include <Library/BaseMemoryLib.h>
 #include <Library/DebugLib.h>
-#include <Library/HobLib.h>
-#include <Library/IoLib.h>
-#include <Library/PcdLib.h>
 #include <Library/RealTimeClockLib.h>
 #include <Library/TimerLib.h>
 
-#include <Configuration/Hob.h>
+#define SECONDS_PER_DAY  86400ULL
 
-STATIC EFI_TIME BaseTime;
+// Seconds since 1970-01-01 of the base time, and the counter value it was set at.
+STATIC UINT64 mBaseSeconds;
+STATIC UINT64 mBaseCounter;
+
+// Days since 1970-01-01 -> civil date (Howard Hinnant's algorithm).
+STATIC
+VOID
+DaysToCivil (
+  IN  INT64   Days,
+  OUT UINT16  *Year,
+  OUT UINT8   *Month,
+  OUT UINT8   *Day
+  )
+{
+  INT64 Z;
+  INT64 Era;
+  INT64 Doe;
+  INT64 Yoe;
+  INT64 Y;
+  INT64 Doy;
+  INT64 Mp;
+
+  Z   = Days + 719468;
+  Era = (Z >= 0 ? Z : Z - 146096) / 146097;
+  Doe = Z - Era * 146097;
+  Yoe = (Doe - Doe / 1460 + Doe / 36524 - Doe / 146096) / 365;
+  Y   = Yoe + Era * 400;
+  Doy = Doe - (365 * Yoe + Yoe / 4 - Yoe / 100);
+  Mp  = (5 * Doy + 2) / 153;
+  *Day   = (UINT8)(Doy - (153 * Mp + 2) / 5 + 1);
+  *Month = (UINT8)(Mp < 10 ? Mp + 3 : Mp - 9);
+  *Year  = (UINT16)(Y + (*Month <= 2 ? 1 : 0));
+}
+
+STATIC
+INT64
+CivilToDays (
+  IN UINT16  Year,
+  IN UINT8   Month,
+  IN UINT8   Day
+  )
+{
+  INT64 Y;
+  INT64 Era;
+  INT64 Yoe;
+  INT64 Doy;
+  INT64 Doe;
+
+  Y   = (INT64)Year - (Month <= 2 ? 1 : 0);
+  Era = (Y >= 0 ? Y : Y - 399) / 400;
+  Yoe = Y - Era * 400;
+  Doy = (153 * (Month > 2 ? Month - 3 : Month + 9) + 2) / 5 + Day - 1;
+  Doe = Yoe * 365 + Yoe / 4 - Yoe / 100 + Doy;
+  return Era * 146097 + Doe - 719468;
+}
+
+// Firmware build date ("Mmm dd yyyy" / "hh:mm:ss") as the initial time.
+STATIC
+UINT64
+BuildTimeSeconds (
+  VOID
+  )
+{
+  STATIC CONST CHAR8 Months[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
+  CONST CHAR8        *D       = __DATE__;
+  CONST CHAR8        *T       = __TIME__;
+  UINT8              Month;
+  UINT8              Day;
+  UINT16             Year;
+  UINTN              I;
+
+  Month = 1;
+  for (I = 0; I < 12; I++) {
+    if ((D[0] == Months[I * 3]) && (D[1] == Months[I * 3 + 1]) && (D[2] == Months[I * 3 + 2])) {
+      Month = (UINT8)(I + 1);
+      break;
+    }
+  }
+
+  Day  = (UINT8)(((D[4] == ' ') ? 0 : (D[4] - '0')) * 10 + (D[5] - '0'));
+  Year = (UINT16)((D[7] - '0') * 1000 + (D[8] - '0') * 100 + (D[9] - '0') * 10 + (D[10] - '0'));
+
+  return (UINT64)CivilToDays (Year, Month, Day) * SECONDS_PER_DAY +
+         (UINT64)((T[0] - '0') * 10 + (T[1] - '0')) * 3600 +
+         (UINT64)((T[3] - '0') * 10 + (T[4] - '0')) * 60 +
+         (UINT64)((T[6] - '0') * 10 + (T[7] - '0'));
+}
 
 /**
-Returns the current time and date information, and the time-keeping capabilities
-of the virtual RTC.
-
-For simplicity, this LibGetTime does not report Years/Months, instead it will
-only report current Day, Hours, Minutes and Seconds starting from the begining
-of CPU up-time. Otherwise, a more complex logic will be required to account for
-leap years and days/month differences.
-
-@param  Time                  A pointer to storage to receive a snapshot of the
-current time.
-@param  Capabilities          An optional pointer to a buffer to receive the
-real time clock device's capabilities.
-
-@retval EFI_SUCCESS           The operation completed successfully.
-@retval EFI_INVALID_PARAMETER Time is NULL.
-@retval EFI_DEVICE_ERROR      The time could not be retrieved due to hardware
-error.
-
+  Returns the current time and date information, and the capabilities of the
+  software RTC.
 **/
 EFI_STATUS
 EFIAPI
-LibGetTime(OUT EFI_TIME *Time, OUT EFI_TIME_CAPABILITIES *Capabilities)
+LibGetTime (
+  OUT EFI_TIME               *Time,
+  OUT EFI_TIME_CAPABILITIES  *Capabilities
+  )
 {
-  UINT32 Freq = ArmGenericTimerGetTimerFreq();
+  UINT32  Freq;
+  UINT64  Seconds;
+  UINT64  Days;
+  UINT64  Rest;
 
   if (Time == NULL) {
     return EFI_INVALID_PARAMETER;
   }
 
-  //
-  // Depend on ARM generic timer to report date/time relative to the
-  // start of CPU timer counting where date and time will always
-  // be relative to the date/time 1/1/1900 00H:00M:00S
-  //
-
-  ASSERT(Freq != 0);
+  Freq = ArmGenericTimerGetTimerFreq ();
+  ASSERT (Freq != 0);
   if (Freq == 0) {
     return EFI_DEVICE_ERROR;
   }
 
-  if (Capabilities) {
+  if (Capabilities != NULL) {
     Capabilities->Accuracy   = 0;
-    Capabilities->Resolution = Freq;
+    Capabilities->Resolution = 1;
     Capabilities->SetsToZero = FALSE;
   }
 
-  UINT64 ElapsedSeconds = GetPerformanceCounter() / Freq;
+  Seconds = mBaseSeconds + (GetPerformanceCounter () - mBaseCounter) / Freq;
+  Days    = Seconds / SECONDS_PER_DAY;
+  Rest    = Seconds % SECONDS_PER_DAY;
 
-  //
-  // Don't report Year/Month since Leap Year logic is not implemented. This
-  // should be fine since the sole purpose of this special implementation is to
-  // be used for relative time measurement. e.g. Windows Boot Manager.
-  //
-
-  Time->Year  = BaseTime.Year;
-  Time->Month = BaseTime.Month;
-
-  const UINT64 SECONDS_PER_DAY = 24 * 60 * 60;
-  Time->Day                    = (ElapsedSeconds / SECONDS_PER_DAY);
-  ElapsedSeconds %= SECONDS_PER_DAY;
-
-  const UINT64 SECONDS_PER_HOUR = 60 * 60;
-  Time->Hour                    = (ElapsedSeconds / SECONDS_PER_HOUR);
-  ElapsedSeconds %= SECONDS_PER_HOUR;
-
-  const UINT64 SECONDS_PER_MINUTE = 60;
-  Time->Minute                    = (ElapsedSeconds / SECONDS_PER_MINUTE);
-  ElapsedSeconds %= SECONDS_PER_MINUTE;
-
-  Time->Second = ElapsedSeconds;
-
-  //
-  // Not required to report in our special case
-  //
-
-  Time->Nanosecond = 0;
-  Time->TimeZone   = 0;
+  ZeroMem (Time, sizeof (*Time));
+  DaysToCivil ((INT64)Days, &Time->Year, &Time->Month, &Time->Day);
+  Time->Hour       = (UINT8)(Rest / 3600);
+  Time->Minute     = (UINT8)((Rest % 3600) / 60);
+  Time->Second     = (UINT8)(Rest % 60);
+  Time->TimeZone   = EFI_UNSPECIFIED_TIMEZONE;
   Time->Daylight   = 0;
 
   return EFI_SUCCESS;
 }
 
 /**
-Sets the current local time and date information.
-
-@param  Time                  A pointer to the current time.
-
-@retval EFI_SUCCESS           The operation completed successfully.
-@retval EFI_INVALID_PARAMETER A time field is out of range.
-@retval EFI_DEVICE_ERROR      The time could not be set due due to hardware
-error.
-
+  Sets the current time.  The value is kept in RAM only.
 **/
 EFI_STATUS
 EFIAPI
-LibSetTime(IN EFI_TIME *Time)
+LibSetTime (
+  IN EFI_TIME  *Time
+  )
 {
-  //
-  // The virtual clock is read-only.
-  //
-  return EFI_UNSUPPORTED;
-}
+  if ((Time == NULL) || (Time->Year < 1970) || (Time->Month < 1) || (Time->Month > 12) ||
+      (Time->Day < 1) || (Time->Day > 31) || (Time->Hour > 23) || (Time->Minute > 59) ||
+      (Time->Second > 59)) {
+    return EFI_INVALID_PARAMETER;
+  }
 
-/**
-Returns the current wakeup alarm clock setting.
-
-@param  Enabled               Indicates if the alarm is currently enabled or
-disabled.
-@param  Pending               Indicates if the alarm signal is pending and
-requires acknowledgement.
-@param  Time                  The current alarm setting.
-
-@retval EFI_SUCCESS           The alarm settings were returned.
-@retval EFI_INVALID_PARAMETER Any parameter is NULL.
-@retval EFI_DEVICE_ERROR      The wakeup time could not be retrieved due to a
-hardware error.
-
-**/
-EFI_STATUS
-EFIAPI
-LibGetWakeupTime(OUT BOOLEAN *Enabled, OUT BOOLEAN *Pending, OUT EFI_TIME *Time)
-{
-  return EFI_UNSUPPORTED;
-}
-
-/**
-Sets the system wakeup alarm clock time.
-
-@param  Enabled               Enable or disable the wakeup alarm.
-@param  Time                  If Enable is TRUE, the time to set the wakeup
-alarm for.
-
-@retval EFI_SUCCESS           If Enable is TRUE, then the wakeup alarm was
-enabled. If Enable is FALSE, then the wakeup alarm was disabled.
-@retval EFI_INVALID_PARAMETER A time field is out of range.
-@retval EFI_DEVICE_ERROR      The wakeup time could not be set due to a hardware
-error.
-@retval EFI_UNSUPPORTED       A wakeup timer is not supported on this platform.
-
-**/
-EFI_STATUS
-EFIAPI
-LibSetWakeupTime(IN BOOLEAN Enabled, OUT EFI_TIME *Time)
-{
-  return EFI_UNSUPPORTED;
-}
-
-/**
-This is the declaration of an EFI image entry point. This can be the entry point
-to an application written to this specification, an EFI boot service driver, or
-an EFI runtime driver.
-
-@param  ImageHandle           Handle that identifies the loaded image.
-@param  SystemTable           System Table for this image.
-
-@retval EFI_SUCCESS           The operation completed successfully.
-
-**/
-EFI_STATUS
-EFIAPI
-LibRtcInitialize(IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
-{
-  BaseTime.Year  = 2019;
-  BaseTime.Month = 1;
-
+  mBaseSeconds = (UINT64)CivilToDays (Time->Year, Time->Month, Time->Day) * SECONDS_PER_DAY +
+                 (UINT64)Time->Hour * 3600 + (UINT64)Time->Minute * 60 + Time->Second;
+  mBaseCounter = GetPerformanceCounter ();
   return EFI_SUCCESS;
 }
 
-/**
-Fixup internal data so that EFI can be call in virtual mode.
-Call the passed in Child Notify event and convert any pointers in
-lib to virtual mode.
+EFI_STATUS
+EFIAPI
+LibGetWakeupTime (
+  OUT BOOLEAN   *Enabled,
+  OUT BOOLEAN   *Pending,
+  OUT EFI_TIME  *Time
+  )
+{
+  return EFI_UNSUPPORTED;
+}
 
-@param[in]    Event   The Event that is being processed
-@param[in]    Context Event Context
-**/
-VOID EFIAPI LibRtcVirtualNotifyEvent(IN EFI_EVENT Event, IN VOID *Context)
+EFI_STATUS
+EFIAPI
+LibSetWakeupTime (
+  IN BOOLEAN    Enabled,
+  OUT EFI_TIME  *Time
+  )
+{
+  return EFI_UNSUPPORTED;
+}
+
+EFI_STATUS
+EFIAPI
+LibRtcInitialize (
+  IN EFI_HANDLE        ImageHandle,
+  IN EFI_SYSTEM_TABLE  *SystemTable
+  )
+{
+  mBaseSeconds = BuildTimeSeconds ();
+  mBaseCounter = GetPerformanceCounter ();
+  return EFI_SUCCESS;
+}
+
+VOID
+EFIAPI
+LibRtcVirtualNotifyEvent (
+  IN EFI_EVENT  Event,
+  IN VOID       *Context
+  )
 {
   return;
 }
